@@ -144,6 +144,3 @@ s := gomap.NewMemStore[User](store.StoreOptions[User]{
 | `Close()` | Close the store and all watchers |
 | `Dump()` | Debug dump of all data |
 
-## License
-
-MIT
