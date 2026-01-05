@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/static/images/logo.svg" alt="Zestor Logo" width="180" style="margin-bottom: 1rem;" />
+</p>
+
 # Zestor
 
 A generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities.
