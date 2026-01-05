@@ -1,0 +1,484 @@
+<!doctype html>
+<html itemscope itemtype="http://schema.org/WebPage" lang="en" class="no-js" data-theme-init>
+  <head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1316&amp;path=livereload" data-no-instant defer></script>
+    <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)"  content="#000000">
+
+<style>
+  html { background: Canvas; color: CanvasText; }
+  @media (prefers-color-scheme: dark) {
+    html { background: #0b0d12; color: #e6e6e6; }
+  }
+  html[data-theme-init] * { transition: none !important; }
+</style>
+
+<script>
+  (function() {
+    const themeKey = 'td-color-theme';
+    const storedTheme = localStorage.getItem(themeKey);
+    let theme = storedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+    if (theme === 'auto') {
+      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    document.documentElement.setAttribute('data-bs-theme', theme);
+  })();
+</script>
+<meta name="robots" content="noindex, nofollow">
+
+
+<link rel="shortcut icon" href="/favicons/favicon.ico" >
+<link rel="apple-touch-icon" href="/favicons/apple-touch-icon-180x180.png" sizes="180x180">
+<link rel="icon" type="image/png" href="/favicons/favicon-16x16.png" sizes="16x16">
+<link rel="icon" type="image/png" href="/favicons/favicon-32x32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="/favicons/android-36x36.png" sizes="36x36">
+<link rel="icon" type="image/png" href="/favicons/android-48x48.png" sizes="48x48">
+<link rel="icon" type="image/png" href="/favicons/android-72x72.png" sizes="72x72">
+<link rel="icon" type="image/png" href="/favicons/android-96x96.png" sizes="96x96">
+<link rel="icon" type="image/png" href="/favicons/android-144x144.png" sizes="144x144">
+<link rel="icon" type="image/png" href="/favicons/android-192x192.png" sizes="192x192">
+
+<title>Watching &amp; Events | Zestor</title>
+<meta name="description" content="Real-time notifications with the Watch API.">
+<meta property="og:url" content="http://localhost:1316/docs/concepts/watching/">
+  <meta property="og:site_name" content="Zestor">
+  <meta property="og:title" content="Watching & Events">
+  <meta property="og:description" content="Real-time notifications with the Watch API.">
+  <meta property="og:locale" content="en_us">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="docs">
+
+  <meta itemprop="name" content="Watching & Events">
+  <meta itemprop="description" content="Real-time notifications with the Watch API.">
+  <meta itemprop="wordCount" content="630">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Watching & Events">
+  <meta name="twitter:description" content="Real-time notifications with the Watch API.">
+<link href="/scss/main.css" rel="stylesheet">
+<script
+  src="https://code.jquery.com/jquery-3.7.1.min.js"
+  integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g=="
+  crossorigin="anonymous"></script>
+
+  </head>
+  <body class="td-page">
+    <header>
+      <nav class="td-navbar js-navbar-scroll" data-bs-theme="dark">
+<div class="td-navbar-container container-fluid flex-column flex-md-row">
+  <a class="navbar-brand" href="/"><span class="navbar-brand__logo navbar-logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3e3 3100" width="32" height="32"><defs><linearGradient id="color-7" gradientTransform="matrix(0.527059, 0, 0, 0.999667, 2216.001953, -1998.600076)"><stop style="stop-color:#6a2c70"/></linearGradient><linearGradient id="color-8"><stop style="stop-color:#f12711" offset="0"/><stop style="stop-color:#f5af19" offset="1"/></linearGradient><linearGradient id="color-8-0" href="#color-8" gradientUnits="userSpaceOnUse" x1="2050" y1="500" x2="2050" y2="3400" gradientTransform="matrix(-0.819187, -0.573527, 0.586207, -0.931035, 2186.229981, 4441.248047)"/><linearGradient gradientUnits="userSpaceOnUse" x1="900" y1="1300" x2="900" y2="3400" id="gradient-0" gradientTransform="matrix(1, 0, 0, 1, -200, -399.999999)"><stop offset="0" style="stop-color:#6a2c70"/><stop offset="1" style="stop-color:#4c0d53"/></linearGradient></defs><path style="fill:url(#color-8-0)" d="M7e2 1e2H29e2L17e2 22e2H29e2L23e2 3e3H1e2L13e2 9e2H1e2L7e2 1e2z"/><path style="fill:url(#gradient-0)" d="M101.207 9e2 1e2 3e3 13e2 9e2H101.207z"/><path style="fill:url(#color-7);transform-box:fill-box;transform-origin:50% 50%" d="M1701.21 1e2 17e2 22e2 29e2 1e2H1701.21z" transform="matrix(-1, 0, 0, -1, -0.000287, 0.000083)"/></svg></span><span class="navbar-brand__name">Zestor</span></a>
+  <div class="td-navbar-nav-scroll td-navbar-nav-scroll--indicator" id="main_navbar">
+    <div class="scroll-indicator scroll-left"></div>
+    <ul class="navbar-nav">
+      <li class="nav-item">
+        <a class="nav-link active" href="/docs/"><span>Documentation</span></a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="https://github.com/zestore-dev/zestor" target="_blank" rel="noopener"><i class='fab fa-github'></i><span>Github</span></a>
+      </li>
+      <li class="nav-item td-navbar__light-dark-menu">
+        <div class="td-light-dark-menu dropdown"><svg xmlns="http://www.w3.org/2000/svg" class="d-none">
+  <symbol id="check2" viewBox="0 0 16 16">
+    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+  </symbol>
+  <symbol id="circle-half" viewBox="0 0 16 16">
+    <path d="M8 15A7 7 0 1 0 8 1v14zm0 1A8 8 0 1 1 8 0a8 8 0 0 1 0 16z"/>
+  </symbol>
+  <symbol id="moon-stars-fill" viewBox="0 0 16 16">
+    <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
+    <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"/>
+  </symbol>
+  <symbol id="sun-fill" viewBox="0 0 16 16">
+    <path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+  </symbol>
+</svg>
+<button class="btn btn-link nav-link dropdown-toggle d-flex align-items-center"
+        id="bd-theme"
+        type="button"
+        aria-expanded="false"
+        data-bs-toggle="dropdown"
+        aria-label="Toggle theme (auto)">
+  <svg class="bi my-1 theme-icon-active"><use href="#circle-half"></use></svg>
+</button>
+<ul class="dropdown-menu" aria-labelledby="bd-theme">
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="light" aria-pressed="false">
+      <svg class="bi me-2 opacity-50"><use href="#sun-fill"></use></svg>
+      Light
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark" aria-pressed="false">
+      <svg class="bi me-2 opacity-50"><use href="#moon-stars-fill"></use></svg>
+      Dark
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center active" data-bs-theme-value="auto" aria-pressed="true">
+      <svg class="bi me-2 opacity-50"><use href="#circle-half"></use></svg>
+      Auto
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+</ul>
+</div>
+
+      </li>
+      </ul>
+    <div class="scroll-indicator scroll-right"></div>
+  </div>
+  <div class="d-none d-lg-block td-navbar__search">
+    
+  </div>
+</div>
+</nav>
+    </header>
+    <div class="container-fluid td-outer">
+      <div class="td-main" data-bs-spy="scroll" data-bs-target=".td-toc" data-bs-root-margin="0px 0px -10%">
+        <div class="row flex-xl-nowrap">
+          <aside class="col-12 col-md-3 col-xl-2 td-sidebar d-print-none">
+            <div id="td-sidebar-menu" class="td-sidebar__inner">
+  <form class="td-sidebar__search d-flex align-items-center">
+    
+    <button class="btn btn-link td-sidebar__toggle" type="button" data-bs-toggle="collapse" data-bs-target="#td-section-nav" aria-controls="td-section-nav" aria-expanded="false" aria-label="Toggle section navigation">
+    </button>
+  </form>
+  <nav class="td-sidebar-nav collapse" id="td-section-nav">
+    <ul class="td-sidebar-nav__section pe-md-3 ul-0">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child active-path" id="m-docs-li">
+    <a href="/docs/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section tree-root" id="m-docs"><span class="">Documentation</span></a>
+    <ul class="ul-1">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsgetting-started-li">
+    <a href="/docs/getting-started/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsgetting-started"><span class="">Getting Started</span></a>
+    <ul class="ul-2 foldable">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsgetting-startedinstallation-li">
+    <a href="/docs/getting-started/installation/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsgetting-startedinstallation"><span class="">Installation</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsgetting-startedquickstart-li">
+    <a href="/docs/getting-started/quickstart/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsgetting-startedquickstart"><span class="">Quick Start</span></a>
+  </li>
+    </ul>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child active-path" id="m-docsconcepts-li">
+    <a href="/docs/concepts/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsconcepts"><span class="">Concepts</span></a>
+    <ul class="ul-2 foldable">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsconceptsstore-li">
+    <a href="/docs/concepts/store/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptsstore"><span class="">Store &amp; Kinds</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child active-path" id="m-docsconceptswatching-li">
+    <a href="/docs/concepts/watching/" class="align-left ps-0 active td-sidebar-link td-sidebar-link__page" id="m-docsconceptswatching"><span class="td-sidebar-nav-active-item">Watching &amp; Events</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsconceptsinterfaces-li">
+    <a href="/docs/concepts/interfaces/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptsinterfaces"><span class="">Interface Segregation</span></a>
+  </li>
+    </ul>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsapi-li">
+    <a href="/docs/api/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsapi"><span class="">API Reference</span></a>
+    <ul class="ul-2 foldable">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsapistore-li">
+    <a href="/docs/api/store/" title="store package" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsapistore"><span class="">store</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsapigomap-li">
+    <a href="/docs/api/gomap/" title="gomap package" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsapigomap"><span class="">gomap</span></a>
+  </li>
+    </ul>
+  </li>
+    </ul>
+  </li>
+    </ul>
+  </nav>
+</div>
+          </aside>
+          <aside class="d-none d-xl-block col-xl-2 td-sidebar-toc d-print-none">
+            <div class="td-page-meta ms-2 pb-1 pt-2 mb-0">
+<a href="https://github.com/zestore-dev/zestor/tree/main/content/docs/concepts/watching.md" class="td-page-meta--view td-page-meta__view" target="_blank" rel="noopener"><i class="fa-solid fa-file-lines fa-fw"></i> View page source</a>
+  <a href="https://github.com/zestore-dev/zestor/edit/main/content/docs/concepts/watching.md" class="td-page-meta--edit td-page-meta__edit" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Edit this page</a>
+  <a href="https://github.com/zestore-dev/zestor/new/main/content/docs/concepts?filename=change-me.md&amp;value=---%0Atitle%3A&#43;%22Long&#43;Page&#43;Title%22%0AlinkTitle%3A&#43;%22Short&#43;Nav&#43;Title%22%0Aweight%3A&#43;100%0Adescription%3A&#43;%3E-%0A&#43;&#43;&#43;&#43;&#43;Page&#43;description&#43;for&#43;heading&#43;and&#43;indexes.%0A---%0A%0A%23%23&#43;Heading%0A%0AEdit&#43;this&#43;template&#43;to&#43;create&#43;your&#43;new&#43;page.%0A%0A%2A&#43;Give&#43;it&#43;a&#43;good&#43;name%2C&#43;ending&#43;in&#43;%60.md%60&#43;-&#43;e.g.&#43;%60getting-started.md%60%0A%2A&#43;Edit&#43;the&#43;%22front&#43;matter%22&#43;section&#43;at&#43;the&#43;top&#43;of&#43;the&#43;page&#43;%28weight&#43;controls&#43;how&#43;its&#43;ordered&#43;amongst&#43;other&#43;pages&#43;in&#43;the&#43;same&#43;directory%3B&#43;lowest&#43;number&#43;first%29.%0A%2A&#43;Add&#43;a&#43;good&#43;commit&#43;message&#43;at&#43;the&#43;bottom&#43;of&#43;the&#43;page&#43;%28%3C80&#43;characters%3B&#43;use&#43;the&#43;extended&#43;description&#43;field&#43;for&#43;more&#43;detail%29.%0A%2A&#43;Create&#43;a&#43;new&#43;branch&#43;so&#43;you&#43;can&#43;preview&#43;your&#43;new&#43;file&#43;and&#43;request&#43;a&#43;review&#43;via&#43;Pull&#43;Request.%0A" class="td-page-meta--child td-page-meta__child" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Create child page</a>
+  <a href="https://github.com/zestore-dev/zestor/issues/new?title=Watching%20&amp;%20Events" class="td-page-meta--issue td-page-meta__issue" target="_blank" rel="noopener"><i class="fa-solid fa-list-check fa-fw"></i> Create documentation issue</a>
+  
+</div>
+
+            <div class="td-toc" data-proofer-ignore>
+<div class="td-toc-title">
+      <span class="td-toc-title__text">On this page</span>
+      <a class="td-toc-title__link" title="Top of page" href="#"></a>
+    </div>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#basic-watching">Basic Watching</a></li>
+    <li><a href="#event-types">Event Types</a></li>
+    <li><a href="#event-structure">Event Structure</a></li>
+    <li><a href="#watch-options">Watch Options</a>
+      <ul>
+        <li><a href="#filter-by-event-type">Filter by Event Type</a></li>
+        <li><a href="#initial-replay">Initial Replay</a></li>
+        <li><a href="#buffer-size">Buffer Size</a></li>
+        <li><a href="#combining-options">Combining Options</a></li>
+      </ul>
+    </li>
+    <li><a href="#cancel-function">Cancel Function</a></li>
+    <li><a href="#multiple-watchers">Multiple Watchers</a></li>
+    <li><a href="#event-delivery-guarantees">Event Delivery Guarantees</a>
+      <ul>
+        <li><a href="#non-blocking-sends">Non-Blocking Sends</a></li>
+        <li><a href="#no-duplicate-suppression-within-watch">No Duplicate Suppression Within Watch</a></li>
+      </ul>
+    </li>
+    <li><a href="#patterns">Patterns</a>
+      <ul>
+        <li><a href="#watch--initial-state">Watch + Initial State</a></li>
+        <li><a href="#event-fan-out">Event Fan-Out</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+
+            
+
+          </aside>
+          <main class="col-12 col-md-9 col-xl-8 ps-md-5" role="main">
+            
+  
+
+            <nav aria-label="breadcrumb" class="td-breadcrumbs">
+  <ol class="breadcrumb">
+  <li class="breadcrumb-item">
+    <a href="/docs/">Documentation</a></li>
+  <li class="breadcrumb-item">
+    <a href="/docs/concepts/">Concepts</a></li>
+  <li class="breadcrumb-item active" aria-current="page">
+    Watching &amp; Events</li>
+  </ol>
+</nav>
+<div class="td-content">
+	<h1>Watching &amp; Events</h1>
+	<div class="lead">Real-time notifications with the Watch API.</div>
+	<header class="article-meta">
+		
+</header>
+	<h2 id="overview">Overview</h2>
+<p>Zestor&rsquo;s watch system lets you subscribe to changes in real-time. When data is created, updated, or deleted, watchers receive events through a channel.</p>
+<h2 id="basic-watching">Basic Watching</h2>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Start watching the &#34;users&#34; kind</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Fatal</span>(<span style="color:#a6e22e">err</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">cancel</span>() <span style="color:#75715e">// Always cancel when done</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Process events</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;%s: %s\n&#34;</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">EventType</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="event-types">Event Types</h2>
+<p>Three event types are emitted:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Event</th>
+          <th>When</th>
+          <th><code>event.Object</code> contains</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>EventTypeCreate</code></td>
+          <td>New key is set</td>
+          <td>The new value</td>
+      </tr>
+      <tr>
+          <td><code>EventTypeUpdate</code></td>
+          <td>Existing key is modified</td>
+          <td>The new value</td>
+      </tr>
+      <tr>
+          <td><code>EventTypeDelete</code></td>
+          <td>Key is deleted</td>
+          <td>The previous value</td>
+      </tr>
+  </tbody>
+</table>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">switch</span> <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">EventType</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">case</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeCreate</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Created %s: %+v\n&#34;</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Object</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">case</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeUpdate</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Updated %s: %+v\n&#34;</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Object</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">case</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeDelete</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Deleted %s (was: %+v)\n&#34;</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Object</span>)
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="event-structure">Event Structure</h2>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">Event</span>[<span style="color:#a6e22e">T</span> <span style="color:#66d9ef">any</span>] <span style="color:#66d9ef">struct</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Kind</span>      <span style="color:#66d9ef">string</span>    <span style="color:#75715e">// The kind (e.g., &#34;users&#34;)</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Name</span>      <span style="color:#66d9ef">string</span>    <span style="color:#75715e">// The key (e.g., &#34;alice&#34;)</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">EventType</span> <span style="color:#a6e22e">EventType</span> <span style="color:#75715e">// create, update, or delete</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Object</span>    <span style="color:#a6e22e">T</span>         <span style="color:#75715e">// The value (or previous value for delete)</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="watch-options">Watch Options</h2>
+<h3 id="filter-by-event-type">Filter by Event Type</h3>
+<p>Only receive specific event types:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Only delete events</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithEventTypes</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeDelete</span>),
+</span></span><span style="display:flex;"><span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Create and update only (no deletes)</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithEventTypes</span>[<span style="color:#a6e22e">User</span>](
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeCreate</span>,
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeUpdate</span>,
+</span></span><span style="display:flex;"><span>    ),
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div><h3 id="initial-replay">Initial Replay</h3>
+<p>Receive existing data as <code>Create</code> events when subscribing:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// First receive all existing users, then continue watching</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithInitialReplay</span>[<span style="color:#a6e22e">User</span>](),
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div><p>This is useful for:</p>
+<ul>
+<li>Building initial state from existing data</li>
+<li>Ensuring you don&rsquo;t miss data that existed before watching</li>
+<li>Implementing &ldquo;sync&rdquo; patterns</li>
+</ul>
+<h3 id="buffer-size">Buffer Size</h3>
+<p>Configure the channel buffer size:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Larger buffer for high-throughput scenarios</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithBufferSize</span>[<span style="color:#a6e22e">User</span>](<span style="color:#ae81ff">1024</span>),
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div><p>Default buffer size is 128. If the buffer fills up (slow consumer), events are <strong>dropped</strong> (non-blocking sends).</p>
+<h3 id="combining-options">Combining Options</h3>
+<p>Options can be combined:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithInitialReplay</span>[<span style="color:#a6e22e">User</span>](),
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithEventTypes</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeCreate</span>, <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeDelete</span>),
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithBufferSize</span>[<span style="color:#a6e22e">User</span>](<span style="color:#ae81ff">256</span>),
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div><h2 id="cancel-function">Cancel Function</h2>
+<p>The <code>cancel</code> function returned by <code>Watch</code> must be called when you&rsquo;re done watching:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Option 1: defer</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">cancel</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Option 2: explicit cancel</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">go</span> <span style="color:#66d9ef">func</span>() {
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">&lt;-</span><span style="color:#a6e22e">stopSignal</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">cancel</span>()
+</span></span><span style="display:flex;"><span>}()
+</span></span></code></pre></div><p>Calling <code>cancel()</code>:</p>
+<ul>
+<li>Closes the event channel</li>
+<li>Removes the watcher from the store</li>
+<li>Is safe to call multiple times</li>
+</ul>
+<h2 id="multiple-watchers">Multiple Watchers</h2>
+<p>You can have multiple watchers on the same kind:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Watcher 1: Log all events</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch1</span>, <span style="color:#a6e22e">cancel1</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">go</span> <span style="color:#66d9ef">func</span>() {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch1</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Printf</span>(<span style="color:#e6db74">&#34;Event: %s %s&#34;</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">EventType</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>)
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Watcher 2: Only track deletes</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch2</span>, <span style="color:#a6e22e">cancel2</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithEventTypes</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeDelete</span>),
+</span></span><span style="display:flex;"><span>)
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">go</span> <span style="color:#66d9ef">func</span>() {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch2</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">notifyUserDeleted</span>(<span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Object</span>)
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}()
+</span></span></code></pre></div><h2 id="event-delivery-guarantees">Event Delivery Guarantees</h2>
+<h3 id="non-blocking-sends">Non-Blocking Sends</h3>
+<p>Events are sent with non-blocking channel sends:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">select</span> {
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">case</span> <span style="color:#a6e22e">wch</span>.<span style="color:#a6e22e">ch</span> <span style="color:#f92672">&lt;-</span> <span style="color:#a6e22e">ev</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// delivered</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">default</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// dropped (buffer full)</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>If your consumer is slow and the buffer fills up, <strong>events will be dropped</strong>. To avoid this:</p>
+<ul>
+<li>Increase buffer size for bursty workloads</li>
+<li>Ensure your event handler is fast</li>
+<li>Offload heavy processing to a worker pool</li>
+</ul>
+<h3 id="no-duplicate-suppression-within-watch">No Duplicate Suppression Within Watch</h3>
+<p>If you call <code>Set</code> with the same value, and the store&rsquo;s <code>CompareFn</code> returns <code>true</code> (values are equal), <strong>no event is emitted</strong>. This prevents unnecessary notifications.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Set</span>(<span style="color:#e6db74">&#34;users&#34;</span>, <span style="color:#e6db74">&#34;alice&#34;</span>, <span style="color:#a6e22e">User</span>{<span style="color:#a6e22e">Name</span>: <span style="color:#e6db74">&#34;Alice&#34;</span>}) <span style="color:#75715e">// Create event</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Set</span>(<span style="color:#e6db74">&#34;users&#34;</span>, <span style="color:#e6db74">&#34;alice&#34;</span>, <span style="color:#a6e22e">User</span>{<span style="color:#a6e22e">Name</span>: <span style="color:#e6db74">&#34;Alice&#34;</span>}) <span style="color:#75715e">// No event (same value)</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Set</span>(<span style="color:#e6db74">&#34;users&#34;</span>, <span style="color:#e6db74">&#34;alice&#34;</span>, <span style="color:#a6e22e">User</span>{<span style="color:#a6e22e">Name</span>: <span style="color:#e6db74">&#34;Alice!&#34;</span>}) <span style="color:#75715e">// Update event</span>
+</span></span></code></pre></div><h2 id="patterns">Patterns</h2>
+<h3 id="watch--initial-state">Watch + Initial State</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">syncUsers</span>(<span style="color:#a6e22e">s</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">Store</span>[<span style="color:#a6e22e">User</span>]) <span style="color:#66d9ef">map</span>[<span style="color:#66d9ef">string</span>]<span style="color:#a6e22e">User</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">state</span> <span style="color:#f92672">:=</span> make(<span style="color:#66d9ef">map</span>[<span style="color:#66d9ef">string</span>]<span style="color:#a6e22e">User</span>)
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>,
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">WithInitialReplay</span>[<span style="color:#a6e22e">User</span>](),
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">cancel</span>()
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">switch</span> <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">EventType</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">case</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeCreate</span>, <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeUpdate</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">state</span>[<span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>] = <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Object</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">case</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">EventTypeDelete</span>:
+</span></span><span style="display:flex;"><span>            delete(<span style="color:#a6e22e">state</span>, <span style="color:#a6e22e">event</span>.<span style="color:#a6e22e">Name</span>)
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> <span style="color:#a6e22e">state</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h3 id="event-fan-out">Event Fan-Out</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">fanOut</span>[<span style="color:#a6e22e">T</span> <span style="color:#66d9ef">any</span>](<span style="color:#a6e22e">ch</span> <span style="color:#f92672">&lt;-</span><span style="color:#66d9ef">chan</span> <span style="color:#f92672">*</span><span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">Event</span>[<span style="color:#a6e22e">T</span>], <span style="color:#a6e22e">handlers</span> <span style="color:#f92672">...</span><span style="color:#66d9ef">func</span>(<span style="color:#f92672">*</span><span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">Event</span>[<span style="color:#a6e22e">T</span>])) {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">for</span> <span style="color:#a6e22e">event</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">ch</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">for</span> <span style="color:#a6e22e">_</span>, <span style="color:#a6e22e">handler</span> <span style="color:#f92672">:=</span> <span style="color:#66d9ef">range</span> <span style="color:#a6e22e">handlers</span> {
+</span></span><span style="display:flex;"><span>            <span style="color:#a6e22e">handler</span>(<span style="color:#a6e22e">event</span>)
+</span></span><span style="display:flex;"><span>        }
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// Usage</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">ch</span>, <span style="color:#a6e22e">cancel</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Watch</span>(<span style="color:#e6db74">&#34;users&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">go</span> <span style="color:#a6e22e">fanOut</span>(<span style="color:#a6e22e">ch</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">logEvent</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">updateMetrics</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">notifyWebsockets</span>,
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div>
+	
+</div>
+
+
+          </main>
+        </div>
+      </div>
+      <footer class="td-footer row d-print-none">
+  <div class="container-fluid">
+    <div class="row mx-md-2">
+      <div class="td-footer__left col-6 col-sm-4 order-sm-1">
+        
+      </div><div class="td-footer__right col-6 col-sm-4 order-sm-3">
+        
+      </div><div class="td-footer__center col-12 col-sm-4 py-2 order-sm-2">
+        
+      </div>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <script src="/js/main.js"></script>
+<script defer src="/js/click-to-copy.js" crossorigin="anonymous"></script>
+<script src='/js/tabpane-persist.js'></script>
+
+  </body>
+</html>

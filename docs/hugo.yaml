@@ -1,0 +1,41 @@
+baseURL: https://docs.zestor.dev/
+languageCode: en-us
+title: Zestor
+
+module:
+  imports:
+    - path: github.com/google/docsy
+    - path: github.com/twbs/bootstrap
+    - path: github.com/FortAwesome/Font-Awesome
+
+params:
+  description: "Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities."
+  author: "Zestor"
+  site_description: "Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities."
+  site_author: "Zestor"
+  site_url: "https://docs.zestor.dev"
+  site_github: "https://github.com/zestore-dev/zestor"
+  github_repo: "https://github.com/zestore-dev/zestor"
+  github_branch: "main"
+
+  # UI configuration
+  ui:
+    # Enable dark mode toggle in navbar
+    showLightDarkModeMenu: true
+    # Set default theme (light, dark, or auto for system preference)
+    theme_mode: auto
+    navbar_logo: true
+    # sidebar_menu_compact: true
+    # sidebar_menu_foldable: true
+    ul_show: 1
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+
+menu:
+  main:
+    - name: Github
+      url: https://github.com/zestore-dev/zestor
+      weight: 50
+      pre: <i class='fab fa-github'></i>

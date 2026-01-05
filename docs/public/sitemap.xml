@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>http://localhost:1316/docs/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/getting-started/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/getting-started/installation/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/api/store/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/concepts/store/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/concepts/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/api/gomap/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/getting-started/quickstart/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/concepts/watching/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/api/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/concepts/interfaces/</loc>
+  </url><url>
+    <loc>http://localhost:1316/categories/</loc>
+  </url><url>
+    <loc>http://localhost:1316/tags/</loc>
+  </url><url>
+    <loc>http://localhost:1316/</loc>
+  </url>
+</urlset>

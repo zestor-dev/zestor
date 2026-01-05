@@ -1,0 +1,291 @@
+<!doctype html>
+<html itemscope itemtype="http://schema.org/WebPage" lang="en" class="no-js" data-theme-init>
+  <head>
+	<meta name="generator" content="Hugo 0.154.1"><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1316&amp;path=livereload" data-no-instant defer></script>
+    <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)"  content="#000000">
+
+<style>
+  html { background: Canvas; color: CanvasText; }
+  @media (prefers-color-scheme: dark) {
+    html { background: #0b0d12; color: #e6e6e6; }
+  }
+  html[data-theme-init] * { transition: none !important; }
+</style>
+
+<script>
+  (function() {
+    const themeKey = 'td-color-theme';
+    const storedTheme = localStorage.getItem(themeKey);
+    let theme = storedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+
+    if (theme === 'auto') {
+      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    document.documentElement.setAttribute('data-bs-theme', theme);
+  })();
+</script>
+<link rel="alternate" type="application/rss&#43;xml" href="http://localhost:1316/index.xml">
+<meta name="robots" content="noindex, nofollow">
+
+
+<link rel="shortcut icon" href="/favicons/favicon.ico" >
+<link rel="apple-touch-icon" href="/favicons/apple-touch-icon-180x180.png" sizes="180x180">
+<link rel="icon" type="image/png" href="/favicons/favicon-16x16.png" sizes="16x16">
+<link rel="icon" type="image/png" href="/favicons/favicon-32x32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="/favicons/android-36x36.png" sizes="36x36">
+<link rel="icon" type="image/png" href="/favicons/android-48x48.png" sizes="48x48">
+<link rel="icon" type="image/png" href="/favicons/android-72x72.png" sizes="72x72">
+<link rel="icon" type="image/png" href="/favicons/android-96x96.png" sizes="96x96">
+<link rel="icon" type="image/png" href="/favicons/android-144x144.png" sizes="144x144">
+<link rel="icon" type="image/png" href="/favicons/android-192x192.png" sizes="192x192">
+
+<title>Zestor</title>
+<meta name="description" content="Zestor A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.
+Get Started GitHub Zestor provides a simple yet powerful way to manage in-memory data in Go applications.">
+<meta property="og:url" content="http://localhost:1316/">
+  <meta property="og:site_name" content="Zestor">
+  <meta property="og:title" content="Zestor">
+  <meta property="og:description" content="Zestor A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.
+Get Started GitHub Zestor provides a simple yet powerful way to manage in-memory data in Go applications.">
+  <meta property="og:locale" content="en_us">
+  <meta property="og:type" content="website">
+
+  <meta itemprop="name" content="Zestor">
+  <meta itemprop="description" content="Zestor A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.
+Get Started GitHub Zestor provides a simple yet powerful way to manage in-memory data in Go applications.">
+  <meta itemprop="wordCount" content="149">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Zestor">
+  <meta name="twitter:description" content="Zestor A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.
+Get Started GitHub Zestor provides a simple yet powerful way to manage in-memory data in Go applications.">
+<link href="/scss/main.css" rel="stylesheet">
+<script
+  src="https://code.jquery.com/jquery-3.7.1.min.js"
+  integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g=="
+  crossorigin="anonymous"></script>
+
+  </head>
+  <body class="td-home">
+    <header>
+      <nav class="td-navbar js-navbar-scroll td-navbar-cover" data-bs-theme="dark">
+<div class="td-navbar-container container-fluid flex-column flex-md-row">
+  <a class="navbar-brand" href="/"><span class="navbar-brand__logo navbar-logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3e3 3100" width="32" height="32"><defs><linearGradient id="color-7" gradientTransform="matrix(0.527059, 0, 0, 0.999667, 2216.001953, -1998.600076)"><stop style="stop-color:#6a2c70"/></linearGradient><linearGradient id="color-8"><stop style="stop-color:#f12711" offset="0"/><stop style="stop-color:#f5af19" offset="1"/></linearGradient><linearGradient id="color-8-0" href="#color-8" gradientUnits="userSpaceOnUse" x1="2050" y1="500" x2="2050" y2="3400" gradientTransform="matrix(-0.819187, -0.573527, 0.586207, -0.931035, 2186.229981, 4441.248047)"/><linearGradient gradientUnits="userSpaceOnUse" x1="900" y1="1300" x2="900" y2="3400" id="gradient-0" gradientTransform="matrix(1, 0, 0, 1, -200, -399.999999)"><stop offset="0" style="stop-color:#6a2c70"/><stop offset="1" style="stop-color:#4c0d53"/></linearGradient></defs><path style="fill:url(#color-8-0)" d="M7e2 1e2H29e2L17e2 22e2H29e2L23e2 3e3H1e2L13e2 9e2H1e2L7e2 1e2z"/><path style="fill:url(#gradient-0)" d="M101.207 9e2 1e2 3e3 13e2 9e2H101.207z"/><path style="fill:url(#color-7);transform-box:fill-box;transform-origin:50% 50%" d="M1701.21 1e2 17e2 22e2 29e2 1e2H1701.21z" transform="matrix(-1, 0, 0, -1, -0.000287, 0.000083)"/></svg></span><span class="navbar-brand__name">Zestor</span></a>
+  <div class="td-navbar-nav-scroll td-navbar-nav-scroll--indicator" id="main_navbar">
+    <div class="scroll-indicator scroll-left"></div>
+    <ul class="navbar-nav">
+      <li class="nav-item">
+        <a class="nav-link" href="/docs/"><span>Documentation</span></a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="https://github.com/zestore-dev/zestor" target="_blank" rel="noopener"><i class='fab fa-github'></i><span>Github</span></a>
+      </li>
+      <li class="nav-item td-navbar__light-dark-menu">
+        <div class="td-light-dark-menu dropdown"><svg xmlns="http://www.w3.org/2000/svg" class="d-none">
+  <symbol id="check2" viewBox="0 0 16 16">
+    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+  </symbol>
+  <symbol id="circle-half" viewBox="0 0 16 16">
+    <path d="M8 15A7 7 0 1 0 8 1v14zm0 1A8 8 0 1 1 8 0a8 8 0 0 1 0 16z"/>
+  </symbol>
+  <symbol id="moon-stars-fill" viewBox="0 0 16 16">
+    <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/>
+    <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162zM13.863.099a.145.145 0 0 1 .274 0l.258.774c.115.346.386.617.732.732l.774.258a.145.145 0 0 1 0 .274l-.774.258a1.156 1.156 0 0 0-.732.732l-.258.774a.145.145 0 0 1-.274 0l-.258-.774a1.156 1.156 0 0 0-.732-.732l-.774-.258a.145.145 0 0 1 0-.274l.774-.258c.346-.115.617-.386.732-.732L13.863.1z"/>
+  </symbol>
+  <symbol id="sun-fill" viewBox="0 0 16 16">
+    <path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+  </symbol>
+</svg>
+<button class="btn btn-link nav-link dropdown-toggle d-flex align-items-center"
+        id="bd-theme"
+        type="button"
+        aria-expanded="false"
+        data-bs-toggle="dropdown"
+        aria-label="Toggle theme (auto)">
+  <svg class="bi my-1 theme-icon-active"><use href="#circle-half"></use></svg>
+</button>
+<ul class="dropdown-menu" aria-labelledby="bd-theme">
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="light" aria-pressed="false">
+      <svg class="bi me-2 opacity-50"><use href="#sun-fill"></use></svg>
+      Light
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark" aria-pressed="false">
+      <svg class="bi me-2 opacity-50"><use href="#moon-stars-fill"></use></svg>
+      Dark
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+  <li>
+    <button type="button" class="dropdown-item d-flex align-items-center active" data-bs-theme-value="auto" aria-pressed="true">
+      <svg class="bi me-2 opacity-50"><use href="#circle-half"></use></svg>
+      Auto
+      <svg class="bi ms-auto d-none"><use href="#check2"></use></svg>
+    </button>
+  </li>
+</ul>
+</div>
+
+      </li>
+      </ul>
+    <div class="scroll-indicator scroll-right"></div>
+  </div>
+  <div class="d-none d-lg-block td-navbar__search">
+    
+  </div>
+</div>
+</nav>
+    </header>
+    <div class="container-fluid td-default td-outer">
+      <main role="main" class="td-main">
+        <section id="td-cover-block-0" class="row td-cover-block td-cover-block--height-min js-td-cover td-overlay td-overlay--dark -bg-dark">
+  <div class="col-12">
+    <div class="container td-overlay__inner">
+      <div class="text-center">
+        
+        
+        <div class="pt-3 lead">
+          
+              <img src="/images/logo.svg" alt="Zestor Logo" style="max-width: 200px; margin-bottom: 1.5rem;">
+<h1 class="display-1 fw-bold">Zestor</h1>
+<p class="lead mt-3 mb-4">A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.</p>
+<div class="mt-4">
+<a class="btn btn-lg btn-primary me-3 mb-4" href="/docs/">
+  Get Started <i class="fas fa-arrow-alt-circle-right ms-2"></i>
+</a>
+<a class="btn btn-lg btn-secondary me-3 mb-4" href="https://github.com/zestore-dev/zestor">
+  <i class="fab fa-github me-2"></i> GitHub
+</a>
+</div>
+<p><a class="btn btn-link text-info" href="#td-block-1" aria-label="Read more"><i class="fa-solid fa-circle-chevron-down" style="font-size: 400%"></i></a></p>
+          
+        </div>
+      </div>
+    </div>
+  </div>
+  
+</section>
+
+<div><a id="td-block-1" class="td-offset-anchor"></a></div>
+<section class="row td-box td-box--primary position-relative td-box--height-auto">
+<div class="col-12">
+<div class="container text-center td-arrow-down">
+<div class="h4 mb-0">
+<p>Zestor provides a simple yet powerful way to manage in-memory data in Go applications.</p>
+<p>Built with <strong>generics</strong>, <strong>thread-safety</strong>, and <strong>real-time notifications</strong> in mind.</p>
+</div>
+</div>
+</div>
+</section>
+<div><a id="td-block-2" class="td-offset-anchor"></a></div>
+<section class="row td-box td-box--dark td-box--height-auto">
+<div class="col">
+<div class="row">
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-bolt"></i>
+</div>
+<h4 class="h3">Type-Safe Generics</h4>
+<div class="mb-0">
+<p>Full Go generics support. Define your data type once and get compile-time type checking throughout your application.</p>
+</div>
+</div>
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-eye"></i>
+</div>
+<h4 class="h3">Watch &amp; Subscribe</h4>
+<div class="mb-0">
+<p>Real-time notifications for create, update, and delete events. Filter by event type and replay existing data on subscribe.</p>
+</div>
+</div>
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-shield-alt"></i>
+</div>
+<h4 class="h3">Thread-Safe</h4>
+<div class="mb-0">
+<p>Built-in concurrency support with <code>sync.RWMutex</code>. Safe for concurrent reads and writes from multiple goroutines.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<div><a id="td-block-3" class="td-offset-anchor"></a></div>
+<section class="row td-box td-box--info td-box--height-auto">
+<div class="col">
+<div class="row">
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-layer-group"></i>
+</div>
+<h4 class="h3">Multi-Kind Storage</h4>
+<div class="mb-0">
+<p>Organize data by &ldquo;kind&rdquo; (like tables or collections). Each kind is isolated and can have its own validation rules.</p>
+</div>
+</div>
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-check-circle"></i>
+</div>
+<h4 class="h3">Validation Hooks</h4>
+<div class="mb-0">
+<p>Define per-kind validation functions to ensure data integrity before writes.</p>
+</div>
+</div>
+<div class="col-lg-4 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1">
+  <i class="fas fa-code-branch"></i>
+</div>
+<h4 class="h3">Interface Segregation</h4>
+<div class="mb-0">
+<p>Split interfaces: <code>Reader</code>, <code>Writer</code>, <code>Watcher</code>. Pass only the access level your code needs.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<div><a id="td-block-4" class="td-offset-anchor"></a></div>
+<section class="row td-box td-box--dark td-box--height-auto">
+<div class="col">
+<div class="container">
+<div class="col-12 text-center">
+<h2>Ready to get started?</h2>
+<a class="btn btn-lg btn-primary mt-4" href="/docs/getting-started/">
+  Read the Documentation <i class="fas fa-book ms-2"></i>
+</a>
+</div>
+</div>
+</div>
+</section>
+
+      </main>
+      <footer class="td-footer row d-print-none">
+  <div class="container-fluid">
+    <div class="row mx-md-2">
+      <div class="td-footer__left col-6 col-sm-4 order-sm-1">
+        
+      </div><div class="td-footer__right col-6 col-sm-4 order-sm-3">
+        
+      </div><div class="td-footer__center col-12 col-sm-4 py-2 order-sm-2">
+        
+      </div>
+    </div>
+  </div>
+</footer>
+
+    </div>
+    <script src="/js/main.js"></script>
+<script defer src="/js/click-to-copy.js" crossorigin="anonymous"></script>
+<script src='/js/tabpane-persist.js'></script>
+
+  </body>
+</html>

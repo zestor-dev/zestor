@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3000 3100" width="32" height="32">
+  <defs>
+    <linearGradient id="color-7" gradientTransform="matrix(0.527059, 0, 0, 0.999667, 2216.001953, -1998.600076)">
+      <stop style="stop-color: #6a2c70;"></stop>
+    </linearGradient>
+    <linearGradient id="color-8">
+      <stop style="stop-color: #f12711;" offset="0"></stop>
+      <stop style="stop-color: #f5af19;" offset="1"></stop>
+    </linearGradient>
+    <linearGradient id="color-8-0" href="#color-8" gradientUnits="userSpaceOnUse" x1="2050" y1="500" x2="2050" y2="3400" gradientTransform="matrix(-0.819187, -0.573527, 0.586207, -0.931035, 2186.229981, 4441.248047)"></linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="900" y1="1300" x2="900" y2="3400" id="gradient-0" gradientTransform="matrix(1, 0, 0, 1, -200, -399.999999)">
+      <stop offset="0" style="stop-color: #6a2c70"></stop>
+      <stop offset="1" style="stop-color: #4c0d53"></stop>
+    </linearGradient>
+  </defs>
+  <path style="fill: url(#color-8-0);" d="M 700 100 L 2900 100 L 1700 2200 L 2900 2200 L 2300 3000 L 100 3000 L 1300 900 L 100 900 L 700 100 Z"></path>
+  <path style="fill: url(#gradient-0);" d="M 101.207 900 L 100 3000 L 1300 900 L 101.207 900 Z"></path>
+  <path style="fill: url(#color-7); transform-box: fill-box; transform-origin: 50% 50%;" d="M 1701.21 100 L 1700 2200 L 2900 100 L 1701.21 100 Z" transform="matrix(-1, 0, 0, -1, -0.000287, 0.000083)"></path>
+</svg>
+
