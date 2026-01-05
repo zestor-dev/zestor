@@ -34,6 +34,6 @@ Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subs
 ## Installation
 
 ```bash
-go get github.com/zestore-dev/zestor
+go get github.com/zestor-dev/zestor
 ```
 

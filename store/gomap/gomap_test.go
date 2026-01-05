@@ -3,7 +3,7 @@ package gomap
 import (
 	"testing"
 
-	"github.com/zestore-dev/zestor/store"
+	"github.com/zestor-dev/zestor/store"
 )
 
 func Test_memStore_Set(t *testing.T) {

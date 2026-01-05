@@ -15,7 +15,7 @@ description: >
 Add Zestor to your project:
 
 ```bash
-go get github.com/zestore-dev/zestor
+go get github.com/zestor-dev/zestor
 ```
 
 ## Import
@@ -24,8 +24,8 @@ Import the packages you need:
 
 ```go
 import (
-    "github.com/zestore-dev/zestor/store"
-    "github.com/zestore-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/gomap"
 )
 ```
 
@@ -41,8 +41,8 @@ package main
 
 import (
     "fmt"
-    "github.com/zestore-dev/zestor/store"
-    "github.com/zestore-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/gomap"
 )
 
 func main() {

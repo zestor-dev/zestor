@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/zestore-dev/zestor/store"
+	"github.com/zestor-dev/zestor/store"
 )
 
 type memStore[T any] struct {

@@ -14,8 +14,8 @@ params:
   site_description: "Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities."
   site_author: "Zestor"
   site_url: "https://docs.zestor.dev"
-  site_github: "https://github.com/zestore-dev/zestor"
-  github_repo: "https://github.com/zestore-dev/zestor"
+  site_github: "https://github.com/zestor-dev/zestor"
+  github_repo: "https://github.com/zestor-dev/zestor"
   github_branch: "main"
 
   # UI configuration
@@ -36,6 +36,6 @@ markup:
 menu:
   main:
     - name: Github
-      url: https://github.com/zestore-dev/zestor
+      url: https://github.com/zestor-dev/zestor
       weight: 50
       pre: <i class='fab fa-github'></i>

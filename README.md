@@ -22,7 +22,7 @@ A generic, type-safe, in-memory key-value store for Go with watch/subscribe capa
 ## Installation
 
 ```bash
-go get github.com/zestore-dev/zestor
+go get github.com/zestor-dev/zestor
 ```
 
 ## Quick Start
@@ -32,8 +32,8 @@ package main
 
 import (
     "fmt"
-    "github.com/zestore-dev/zestor/store"
-    "github.com/zestore-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/gomap"
 )
 
 type User struct {

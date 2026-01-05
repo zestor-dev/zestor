@@ -7,7 +7,7 @@ description: >
 ---
 
 ```go
-import "github.com/zestore-dev/zestor/store"
+import "github.com/zestor-dev/zestor/store"
 ```
 
 The `store` package defines interfaces, types, and options for Zestor stores.

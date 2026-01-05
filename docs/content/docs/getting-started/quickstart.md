@@ -17,8 +17,8 @@ package main
 
 import (
     "fmt"
-    "github.com/zestore-dev/zestor/store"
-    "github.com/zestore-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/gomap"
 )
 
 type User struct {
@@ -176,8 +176,8 @@ import (
     "fmt"
     "time"
     
-    "github.com/zestore-dev/zestor/store"
-    "github.com/zestore-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/gomap"
 )
 
 type User struct {

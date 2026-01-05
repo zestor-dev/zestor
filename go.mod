@@ -1,3 +1,3 @@
-module github.com/zestore-dev/zestor
+module github.com/zestor-dev/zestor
 
 go 1.21

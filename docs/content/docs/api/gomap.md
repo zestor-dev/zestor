@@ -7,7 +7,7 @@ description: >
 ---
 
 ```go
-import "github.com/zestore-dev/zestor/store/gomap"
+import "github.com/zestor-dev/zestor/store/gomap"
 ```
 
 The `gomap` package provides an in-memory implementation of the `store.Store` interface using Go maps.
