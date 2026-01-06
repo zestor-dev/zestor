@@ -39,7 +39,7 @@ Real-time notifications for create, update, and delete events. Filter by event t
 {{% /blocks/feature %}}
 
 {{% blocks/feature icon="fa-shield-alt" title="Thread-Safe" %}}
-Built-in concurrency support with `sync.RWMutex`. Safe for concurrent reads and writes from multiple goroutines.
+Built-in concurrency support. Safe for concurrent reads and writes from multiple goroutines.
 {{% /blocks/feature %}}
 
 {{% /blocks/section %}}
