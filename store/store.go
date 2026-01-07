@@ -5,7 +5,6 @@ import (
 	"reflect"
 )
 
-// Sentinel errors
 var (
 	ErrClosed       = errors.New("store closed")
 	ErrKeyNotFound  = errors.New("key not found")
