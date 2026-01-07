@@ -25,12 +25,28 @@ Import the packages you need:
 ```go
 import (
     "github.com/zestor-dev/zestor/store"
-    "github.com/zestor-dev/zestor/store/gomap"
+    "github.com/zestor-dev/zestor/store/gomap"  // In-memory store
 )
 ```
 
-- `store` — Contains interfaces, types, and options
-- `store/gomap` — The in-memory implementation
+For persistent storage with SQLite:
+
+```go
+import (
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/sqlite"  // SQLite store
+    "github.com/zestor-dev/zestor/codec"         // Serialization codecs
+)
+```
+
+### Package Overview
+
+| Package | Description |
+|---------|-------------|
+| `store` | Core interfaces, types, and options |
+| `store/gomap` | In-memory implementation |
+| `store/sqlite` | SQLite-backed persistent implementation |
+| `codec` | Serialization codecs (JSON, Protobuf, YAML) |
 
 ## Verify Installation
 

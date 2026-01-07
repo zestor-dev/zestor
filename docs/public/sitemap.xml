@@ -6,6 +6,8 @@
   </url><url>
     <loc>http://localhost:1316/docs/getting-started/</loc>
   </url><url>
+    <loc>http://localhost:1316/docs/implementations/gomap/</loc>
+  </url><url>
     <loc>http://localhost:1316/docs/getting-started/installation/</loc>
   </url><url>
     <loc>http://localhost:1316/docs/api/store/</loc>
@@ -14,15 +16,19 @@
   </url><url>
     <loc>http://localhost:1316/docs/concepts/</loc>
   </url><url>
-    <loc>http://localhost:1316/docs/api/gomap/</loc>
-  </url><url>
     <loc>http://localhost:1316/docs/getting-started/quickstart/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/implementations/sqlite/</loc>
   </url><url>
     <loc>http://localhost:1316/docs/concepts/watching/</loc>
   </url><url>
-    <loc>http://localhost:1316/docs/api/</loc>
-  </url><url>
     <loc>http://localhost:1316/docs/concepts/interfaces/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/concepts/codec/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/implementations/</loc>
+  </url><url>
+    <loc>http://localhost:1316/docs/api/</loc>
   </url><url>
     <loc>http://localhost:1316/categories/</loc>
   </url><url>

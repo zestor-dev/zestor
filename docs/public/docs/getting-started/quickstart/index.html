@@ -48,7 +48,7 @@
 
   <meta itemprop="name" content="Quick Start">
   <meta itemprop="description" content="Build your first Zestor application.">
-  <meta itemprop="wordCount" content="518">
+  <meta itemprop="wordCount" content="614">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Quick Start">
   <meta name="twitter:description" content="Build your first Zestor application.">
@@ -165,6 +165,17 @@
     <a href="/docs/concepts/watching/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptswatching"><span class="">Watching &amp; Events</span></a>
   </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsconceptsinterfaces-li">
     <a href="/docs/concepts/interfaces/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptsinterfaces"><span class="">Interface Segregation</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsconceptscodec-li">
+    <a href="/docs/concepts/codec/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptscodec"><span class="">Codecs</span></a>
+  </li>
+    </ul>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsimplementations-li">
+    <a href="/docs/implementations/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsimplementations"><span class="">Implementations</span></a>
+    <ul class="ul-2 foldable">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsimplementationsgomap-li">
+    <a href="/docs/implementations/gomap/" title="In-Memory Store (gomap)" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsimplementationsgomap"><span class="">gomap</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsimplementationssqlite-li">
+    <a href="/docs/implementations/sqlite/" title="SQLite Store" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsimplementationssqlite"><span class="">sqlite</span></a>
   </li>
     </ul>
   </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsapi-li">
@@ -172,8 +183,6 @@
     <ul class="ul-2 foldable">
       <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsapistore-li">
     <a href="/docs/api/store/" title="store package" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsapistore"><span class="">store</span></a>
-  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsapigomap-li">
-    <a href="/docs/api/gomap/" title="gomap package" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsapigomap"><span class="">gomap</span></a>
   </li>
     </ul>
   </li>
@@ -199,7 +208,12 @@
     </div>
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#create-a-store">Create a Store</a></li>
+    <li><a href="#create-a-store">Create a Store</a>
+      <ul>
+        <li><a href="#in-memory-store-gomap">In-Memory Store (gomap)</a></li>
+        <li><a href="#sqlite-store-sqlite">SQLite Store (sqlite)</a></li>
+      </ul>
+    </li>
     <li><a href="#basic-crud-operations">Basic CRUD Operations</a>
       <ul>
         <li><a href="#create--update">Create / Update</a></li>
@@ -244,7 +258,9 @@
 </header>
 	<p>This guide walks you through building a simple application using Zestor.</p>
 <h2 id="create-a-store">Create a Store</h2>
-<p>First, define your data type and create a store:</p>
+<p>First, define your data type and create a store. Zestor offers two implementations:</p>
+<h3 id="in-memory-store-gomap">In-Memory Store (gomap)</h3>
+<p>Best for: caching, testing, ephemeral data.</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">package</span> <span style="color:#a6e22e">main</span>
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span><span style="color:#f92672">import</span> (
@@ -260,11 +276,39 @@
 </span></span><span style="display:flex;"><span>}
 </span></span><span style="display:flex;"><span>
 </span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">main</span>() {
-</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// Create a new store for User types</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// Create a new in-memory store</span>
 </span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">s</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">gomap</span>.<span style="color:#a6e22e">NewMemStore</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">StoreOptions</span>[<span style="color:#a6e22e">User</span>]{})
 </span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Close</span>()
 </span></span><span style="display:flex;"><span>}
-</span></span></code></pre></div><h2 id="basic-crud-operations">Basic CRUD Operations</h2>
+</span></span></code></pre></div><h3 id="sqlite-store-sqlite">SQLite Store (sqlite)</h3>
+<p>Best for: persistence, desktop apps, CLI tools.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">package</span> <span style="color:#a6e22e">main</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">import</span> (
+</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;log&#34;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/codec&#34;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store/sqlite&#34;</span>
+</span></span><span style="display:flex;"><span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">type</span> <span style="color:#a6e22e">User</span> <span style="color:#66d9ef">struct</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Name</span>  <span style="color:#66d9ef">string</span> <span style="color:#e6db74">`json:&#34;name&#34;`</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Email</span> <span style="color:#66d9ef">string</span> <span style="color:#e6db74">`json:&#34;email&#34;`</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">Role</span>  <span style="color:#66d9ef">string</span> <span style="color:#e6db74">`json:&#34;role&#34;`</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">main</span>() {
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// Create a persistent SQLite store</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">s</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">sqlite</span>.<span style="color:#a6e22e">New</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">sqlite</span>.<span style="color:#a6e22e">Options</span>{
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">DSN</span>:   <span style="color:#e6db74">&#34;file:myapp.db?cache=shared&#34;</span>,
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">Codec</span>: <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">codec</span>.<span style="color:#a6e22e">JSON</span>{},
+</span></span><span style="display:flex;"><span>    })
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> <span style="color:#a6e22e">err</span> <span style="color:#f92672">!=</span> <span style="color:#66d9ef">nil</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">log</span>.<span style="color:#a6e22e">Fatal</span>(<span style="color:#a6e22e">err</span>)
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Close</span>()
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Both implementations share the same <code>store.Store[T]</code> interface, so all operations below work identically.</p>
+<h2 id="basic-crud-operations">Basic CRUD Operations</h2>
 <h3 id="create--update">Create / Update</h3>
 <p>Use <code>Set</code> to create or update values:</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Create a user (returns created=true)</span>
@@ -397,6 +441,8 @@
 </span></span></code></pre></div><h2 id="next-steps">Next Steps</h2>
 <ul>
 <li>Learn about <a href="/docs/concepts/">Concepts</a> like kinds, validation, and interface segregation</li>
+<li>See <a href="/docs/implementations/">Implementations</a> for gomap and sqlite details</li>
+<li>Learn about <a href="/docs/concepts/codec/">Codecs</a> for serialization</li>
 <li>Explore the full <a href="/docs/api/">API Reference</a></li>
 </ul>
 

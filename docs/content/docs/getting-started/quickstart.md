@@ -10,7 +10,11 @@ This guide walks you through building a simple application using Zestor.
 
 ## Create a Store
 
-First, define your data type and create a store:
+First, define your data type and create a store. Zestor offers two implementations:
+
+### In-Memory Store (gomap)
+
+Best for: caching, testing, ephemeral data.
 
 ```go
 package main
@@ -28,11 +32,45 @@ type User struct {
 }
 
 func main() {
-    // Create a new store for User types
+    // Create a new in-memory store
     s := gomap.NewMemStore[User](store.StoreOptions[User]{})
     defer s.Close()
 }
 ```
+
+### SQLite Store (sqlite)
+
+Best for: persistence, desktop apps, CLI tools.
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/zestor-dev/zestor/codec"
+    "github.com/zestor-dev/zestor/store/sqlite"
+)
+
+type User struct {
+    Name  string `json:"name"`
+    Email string `json:"email"`
+    Role  string `json:"role"`
+}
+
+func main() {
+    // Create a persistent SQLite store
+    s, err := sqlite.New[User](sqlite.Options{
+        DSN:   "file:myapp.db?cache=shared",
+        Codec: &codec.JSON{},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer s.Close()
+}
+```
+
+Both implementations share the same `store.Store[T]` interface, so all operations below work identically.
 
 ## Basic CRUD Operations
 
@@ -214,5 +252,7 @@ func main() {
 ## Next Steps
 
 - Learn about [Concepts](/docs/concepts/) like kinds, validation, and interface segregation
+- See [Implementations](/docs/implementations/) for gomap and sqlite details
+- Learn about [Codecs](/docs/concepts/codec/) for serialization
 - Explore the full [API Reference](/docs/api/)
 

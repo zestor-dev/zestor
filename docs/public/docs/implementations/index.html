@@ -29,6 +29,7 @@
     document.documentElement.setAttribute('data-bs-theme', theme);
   })();
 </script>
+<link rel="alternate" type="application/rss&#43;xml" href="http://localhost:1316/docs/implementations/index.xml">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="/favicons/favicon.ico" sizes="any">
 <link rel="icon" href="/favicons/favicon.ico" type="image/x-icon">
@@ -36,22 +37,21 @@
 <link rel="icon" type="image/png" sizes="192x192" href="/favicons/android-chrome-192x192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/favicons/android-chrome-512x512.png">
 
-<title>Installation | Zestor</title>
-<meta name="description" content="How to install Zestor in your Go project.">
-<meta property="og:url" content="http://localhost:1316/docs/getting-started/installation/">
+<title>Implementations | Zestor</title>
+<meta name="description" content="Available store implementations and when to use each.">
+<meta property="og:url" content="http://localhost:1316/docs/implementations/">
   <meta property="og:site_name" content="Zestor">
-  <meta property="og:title" content="Installation">
-  <meta property="og:description" content="How to install Zestor in your Go project.">
+  <meta property="og:title" content="Implementations">
+  <meta property="og:description" content="Available store implementations and when to use each.">
   <meta property="og:locale" content="en_us">
-  <meta property="og:type" content="article">
-    <meta property="article:section" content="docs">
+  <meta property="og:type" content="website">
 
-  <meta itemprop="name" content="Installation">
-  <meta itemprop="description" content="How to install Zestor in your Go project.">
-  <meta itemprop="wordCount" content="133">
+  <meta itemprop="name" content="Implementations">
+  <meta itemprop="description" content="Available store implementations and when to use each.">
+  <meta itemprop="wordCount" content="215">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Installation">
-  <meta name="twitter:description" content="How to install Zestor in your Go project.">
+  <meta name="twitter:title" content="Implementations">
+  <meta name="twitter:description" content="Available store implementations and when to use each.">
 <link href="/scss/main.css" rel="stylesheet">
 <script
   src="https://code.jquery.com/jquery-3.7.1.min.js"
@@ -59,7 +59,7 @@
   crossorigin="anonymous"></script>
 
   </head>
-  <body class="td-page">
+  <body class="td-section">
     <header>
       <nav class="td-navbar js-navbar-scroll" data-bs-theme="dark">
 <div class="td-navbar-container container-fluid flex-column flex-md-row">
@@ -147,11 +147,11 @@
       <li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child active-path" id="m-docs-li">
     <a href="/docs/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section tree-root" id="m-docs"><span class="">Documentation</span></a>
     <ul class="ul-1">
-      <li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child active-path" id="m-docsgetting-started-li">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsgetting-started-li">
     <a href="/docs/getting-started/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsgetting-started"><span class="">Getting Started</span></a>
     <ul class="ul-2 foldable">
-      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child active-path" id="m-docsgetting-startedinstallation-li">
-    <a href="/docs/getting-started/installation/" class="align-left ps-0 active td-sidebar-link td-sidebar-link__page" id="m-docsgetting-startedinstallation"><span class="td-sidebar-nav-active-item">Installation</span></a>
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsgetting-startedinstallation-li">
+    <a href="/docs/getting-started/installation/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsgetting-startedinstallation"><span class="">Installation</span></a>
   </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsgetting-startedquickstart-li">
     <a href="/docs/getting-started/quickstart/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsgetting-startedquickstart"><span class="">Quick Start</span></a>
   </li>
@@ -169,8 +169,8 @@
     <a href="/docs/concepts/codec/" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsconceptscodec"><span class="">Codecs</span></a>
   </li>
     </ul>
-  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child" id="m-docsimplementations-li">
-    <a href="/docs/implementations/" class="align-left ps-0 td-sidebar-link td-sidebar-link__section" id="m-docsimplementations"><span class="">Implementations</span></a>
+  </li><li class="td-sidebar-nav__section-title td-sidebar-nav__section with-child active-path" id="m-docsimplementations-li">
+    <a href="/docs/implementations/" class="align-left ps-0 active td-sidebar-link td-sidebar-link__section" id="m-docsimplementations"><span class="td-sidebar-nav-active-item">Implementations</span></a>
     <ul class="ul-2 foldable">
       <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child" id="m-docsimplementationsgomap-li">
     <a href="/docs/implementations/gomap/" title="In-Memory Store (gomap)" class="align-left ps-0 td-sidebar-link td-sidebar-link__page" id="m-docsimplementationsgomap"><span class="">gomap</span></a>
@@ -194,10 +194,10 @@
           </aside>
           <aside class="d-none d-xl-block col-xl-2 td-sidebar-toc d-print-none">
             <div class="td-page-meta ms-2 pb-1 pt-2 mb-0">
-<a href="https://github.com/zestor-dev/zestor/tree/main/content/docs/getting-started/installation.md" class="td-page-meta--view td-page-meta__view" target="_blank" rel="noopener"><i class="fa-solid fa-file-lines fa-fw"></i> View page source</a>
-  <a href="https://github.com/zestor-dev/zestor/edit/main/content/docs/getting-started/installation.md" class="td-page-meta--edit td-page-meta__edit" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Edit this page</a>
-  <a href="https://github.com/zestor-dev/zestor/new/main/content/docs/getting-started?filename=change-me.md&amp;value=---%0Atitle%3A&#43;%22Long&#43;Page&#43;Title%22%0AlinkTitle%3A&#43;%22Short&#43;Nav&#43;Title%22%0Aweight%3A&#43;100%0Adescription%3A&#43;%3E-%0A&#43;&#43;&#43;&#43;&#43;Page&#43;description&#43;for&#43;heading&#43;and&#43;indexes.%0A---%0A%0A%23%23&#43;Heading%0A%0AEdit&#43;this&#43;template&#43;to&#43;create&#43;your&#43;new&#43;page.%0A%0A%2A&#43;Give&#43;it&#43;a&#43;good&#43;name%2C&#43;ending&#43;in&#43;%60.md%60&#43;-&#43;e.g.&#43;%60getting-started.md%60%0A%2A&#43;Edit&#43;the&#43;%22front&#43;matter%22&#43;section&#43;at&#43;the&#43;top&#43;of&#43;the&#43;page&#43;%28weight&#43;controls&#43;how&#43;its&#43;ordered&#43;amongst&#43;other&#43;pages&#43;in&#43;the&#43;same&#43;directory%3B&#43;lowest&#43;number&#43;first%29.%0A%2A&#43;Add&#43;a&#43;good&#43;commit&#43;message&#43;at&#43;the&#43;bottom&#43;of&#43;the&#43;page&#43;%28%3C80&#43;characters%3B&#43;use&#43;the&#43;extended&#43;description&#43;field&#43;for&#43;more&#43;detail%29.%0A%2A&#43;Create&#43;a&#43;new&#43;branch&#43;so&#43;you&#43;can&#43;preview&#43;your&#43;new&#43;file&#43;and&#43;request&#43;a&#43;review&#43;via&#43;Pull&#43;Request.%0A" class="td-page-meta--child td-page-meta__child" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Create child page</a>
-  <a href="https://github.com/zestor-dev/zestor/issues/new?title=Installation" class="td-page-meta--issue td-page-meta__issue" target="_blank" rel="noopener"><i class="fa-solid fa-list-check fa-fw"></i> Create documentation issue</a>
+<a href="https://github.com/zestor-dev/zestor/tree/main/content/docs/implementations/_index.md" class="td-page-meta--view td-page-meta__view" target="_blank" rel="noopener"><i class="fa-solid fa-file-lines fa-fw"></i> View page source</a>
+  <a href="https://github.com/zestor-dev/zestor/edit/main/content/docs/implementations/_index.md" class="td-page-meta--edit td-page-meta__edit" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Edit this page</a>
+  <a href="https://github.com/zestor-dev/zestor/new/main/content/docs/implementations?filename=change-me.md&amp;value=---%0Atitle%3A&#43;%22Long&#43;Page&#43;Title%22%0AlinkTitle%3A&#43;%22Short&#43;Nav&#43;Title%22%0Aweight%3A&#43;100%0Adescription%3A&#43;%3E-%0A&#43;&#43;&#43;&#43;&#43;Page&#43;description&#43;for&#43;heading&#43;and&#43;indexes.%0A---%0A%0A%23%23&#43;Heading%0A%0AEdit&#43;this&#43;template&#43;to&#43;create&#43;your&#43;new&#43;page.%0A%0A%2A&#43;Give&#43;it&#43;a&#43;good&#43;name%2C&#43;ending&#43;in&#43;%60.md%60&#43;-&#43;e.g.&#43;%60getting-started.md%60%0A%2A&#43;Edit&#43;the&#43;%22front&#43;matter%22&#43;section&#43;at&#43;the&#43;top&#43;of&#43;the&#43;page&#43;%28weight&#43;controls&#43;how&#43;its&#43;ordered&#43;amongst&#43;other&#43;pages&#43;in&#43;the&#43;same&#43;directory%3B&#43;lowest&#43;number&#43;first%29.%0A%2A&#43;Add&#43;a&#43;good&#43;commit&#43;message&#43;at&#43;the&#43;bottom&#43;of&#43;the&#43;page&#43;%28%3C80&#43;characters%3B&#43;use&#43;the&#43;extended&#43;description&#43;field&#43;for&#43;more&#43;detail%29.%0A%2A&#43;Create&#43;a&#43;new&#43;branch&#43;so&#43;you&#43;can&#43;preview&#43;your&#43;new&#43;file&#43;and&#43;request&#43;a&#43;review&#43;via&#43;Pull&#43;Request.%0A" class="td-page-meta--child td-page-meta__child" target="_blank" rel="noopener"><i class="fa-solid fa-pen-to-square fa-fw"></i> Create child page</a>
+  <a href="https://github.com/zestor-dev/zestor/issues/new?title=Implementations" class="td-page-meta--issue td-page-meta__issue" target="_blank" rel="noopener"><i class="fa-solid fa-list-check fa-fw"></i> Create documentation issue</a>
   
 </div>
 
@@ -208,14 +208,17 @@
     </div>
     <nav id="TableOfContents">
   <ul>
-    <li><a href="#requirements">Requirements</a></li>
-    <li><a href="#install-via-go-modules">Install via Go Modules</a></li>
-    <li><a href="#import">Import</a>
+    <li><a href="#available-implementations">Available Implementations</a></li>
+    <li><a href="#choosing-an-implementation">Choosing an Implementation</a>
       <ul>
-        <li><a href="#package-overview">Package Overview</a></li>
+        <li><a href="#use-gomap-when">Use gomap when:</a></li>
+        <li><a href="#use-sqlite-when">Use sqlite when:</a></li>
       </ul>
     </li>
-    <li><a href="#verify-installation">Verify Installation</a></li>
+    <li><a href="#interface-compatibility">Interface Compatibility</a></li>
+    <li><a href="#swapping-implementations">Swapping Implementations</a></li>
+    <li><a href="#feature-comparison">Feature Comparison</a></li>
+    <li><a href="#coming-soon">Coming Soon</a></li>
   </ul>
 </nav>
   </div>
@@ -231,93 +234,161 @@
   <ol class="breadcrumb">
   <li class="breadcrumb-item">
     <a href="/docs/">Documentation</a></li>
-  <li class="breadcrumb-item">
-    <a href="/docs/getting-started/">Getting Started</a></li>
   <li class="breadcrumb-item active" aria-current="page">
-    Installation</li>
+    Implementations</li>
   </ol>
 </nav>
 <div class="td-content">
-	<h1>Installation</h1>
-	<div class="lead">How to install Zestor in your Go project.</div>
+	<h1>Implementations</h1>
+  <div class="lead">Available store implementations and when to use each.</div>
 	<header class="article-meta">
 		
 </header>
-	<h2 id="requirements">Requirements</h2>
-<ul>
-<li>Go 1.21 or later</li>
-</ul>
-<h2 id="install-via-go-modules">Install via Go Modules</h2>
-<p>Add Zestor to your project:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>go get github.com/zestor-dev/zestor
-</span></span></code></pre></div><h2 id="import">Import</h2>
-<p>Import the packages you need:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">import</span> (
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store&#34;</span>
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store/gomap&#34;</span>  <span style="color:#75715e">// In-memory store</span>
-</span></span><span style="display:flex;"><span>)
-</span></span></code></pre></div><p>For persistent storage with SQLite:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">import</span> (
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store&#34;</span>
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store/sqlite&#34;</span>  <span style="color:#75715e">// SQLite store</span>
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/codec&#34;</span>         <span style="color:#75715e">// Serialization codecs</span>
-</span></span><span style="display:flex;"><span>)
-</span></span></code></pre></div><h3 id="package-overview">Package Overview</h3>
+	<p>Zestor provides multiple store implementations, all sharing the same <code>store.Store[T]</code> interface. This means you can swap implementations without changing your application code.</p>
+<h2 id="available-implementations">Available Implementations</h2>
 <table>
   <thead>
       <tr>
-          <th>Package</th>
-          <th>Description</th>
+          <th>Implementation</th>
+          <th>Storage</th>
+          <th>Persistence</th>
+          <th>Best For</th>
       </tr>
   </thead>
   <tbody>
       <tr>
-          <td><code>store</code></td>
-          <td>Core interfaces, types, and options</td>
+          <td><a href="gomap/">gomap</a></td>
+          <td>Memory</td>
+          <td>❌ Ephemeral</td>
+          <td>Caching, testing, high-speed access</td>
       </tr>
       <tr>
-          <td><code>store/gomap</code></td>
-          <td>In-memory implementation</td>
-      </tr>
-      <tr>
-          <td><code>store/sqlite</code></td>
-          <td>SQLite-backed persistent implementation</td>
-      </tr>
-      <tr>
-          <td><code>codec</code></td>
-          <td>Serialization codecs (JSON, Protobuf, YAML)</td>
+          <td><a href="sqlite/">sqlite</a></td>
+          <td>SQLite file</td>
+          <td>✅ Persistent</td>
+          <td>Desktop apps, CLI tools, embedded</td>
       </tr>
   </tbody>
 </table>
-<h2 id="verify-installation">Verify Installation</h2>
-<p>Create a simple test file:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#f92672">package</span> <span style="color:#a6e22e">main</span>
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#f92672">import</span> (
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;fmt&#34;</span>
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store&#34;</span>
-</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;github.com/zestor-dev/zestor/store/gomap&#34;</span>
-</span></span><span style="display:flex;"><span>)
-</span></span><span style="display:flex;"><span>
-</span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">main</span>() {
-</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">s</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">gomap</span>.<span style="color:#a6e22e">NewMemStore</span>[<span style="color:#66d9ef">string</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">StoreOptions</span>[<span style="color:#66d9ef">string</span>]{})
-</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">defer</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Close</span>()
-</span></span><span style="display:flex;"><span>    
-</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Set</span>(<span style="color:#e6db74">&#34;test&#34;</span>, <span style="color:#e6db74">&#34;hello&#34;</span>, <span style="color:#e6db74">&#34;world&#34;</span>)
-</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">val</span>, <span style="color:#a6e22e">ok</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">Get</span>(<span style="color:#e6db74">&#34;test&#34;</span>, <span style="color:#e6db74">&#34;hello&#34;</span>)
-</span></span><span style="display:flex;"><span>    
-</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> <span style="color:#a6e22e">ok</span> {
-</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">fmt</span>.<span style="color:#a6e22e">Println</span>(<span style="color:#e6db74">&#34;Zestor is working:&#34;</span>, <span style="color:#a6e22e">val</span>)
-</span></span><span style="display:flex;"><span>    }
+<h2 id="choosing-an-implementation">Choosing an Implementation</h2>
+<h3 id="use-gomap-when">Use gomap when:</h3>
+<ul>
+<li>You need maximum speed (no serialization overhead)</li>
+<li>Data is ephemeral (cache, session data)</li>
+<li>You&rsquo;re writing tests</li>
+<li>Memory usage is acceptable</li>
+</ul>
+<h3 id="use-sqlite-when">Use sqlite when:</h3>
+<ul>
+<li>Data must survive restarts</li>
+<li>You need ACID transactions</li>
+<li>Building desktop or CLI applications</li>
+<li>Single-file deployment is important</li>
+</ul>
+<h2 id="interface-compatibility">Interface Compatibility</h2>
+<p>All implementations satisfy <code>store.Store[T]</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#75715e">// Works with any implementation</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">processUsers</span>(<span style="color:#a6e22e">s</span> <span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">Store</span>[<span style="color:#a6e22e">User</span>]) <span style="color:#66d9ef">error</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">users</span>, <span style="color:#a6e22e">err</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">s</span>.<span style="color:#a6e22e">List</span>(<span style="color:#e6db74">&#34;users&#34;</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">// ...</span>
 </span></span><span style="display:flex;"><span>}
-</span></span></code></pre></div><p>Run it:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>go run main.go
-</span></span><span style="display:flex;"><span><span style="color:#75715e"># Output: Zestor is working: world</span>
-</span></span></code></pre></div><p>You&rsquo;re ready to go! Continue to the <a href="/docs/getting-started/quickstart/">Quick Start</a> guide.</p>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// In-memory</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">memStore</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">gomap</span>.<span style="color:#a6e22e">NewMemStore</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">opts</span>)
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">processUsers</span>(<span style="color:#a6e22e">memStore</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">// SQLite</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">sqlStore</span>, <span style="color:#a6e22e">_</span> <span style="color:#f92672">:=</span> <span style="color:#a6e22e">sqlite</span>.<span style="color:#a6e22e">New</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">sqlOpts</span>)
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">processUsers</span>(<span style="color:#a6e22e">sqlStore</span>)
+</span></span></code></pre></div><h2 id="swapping-implementations">Swapping Implementations</h2>
+<p>A common pattern is using gomap for tests and sqlite for production:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#66d9ef">func</span> <span style="color:#a6e22e">NewStore</span>(<span style="color:#a6e22e">cfg</span> <span style="color:#a6e22e">Config</span>) (<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">Store</span>[<span style="color:#a6e22e">User</span>], <span style="color:#66d9ef">error</span>) {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">if</span> <span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">Testing</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">return</span> <span style="color:#a6e22e">gomap</span>.<span style="color:#a6e22e">NewMemStore</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">store</span>.<span style="color:#a6e22e">StoreOptions</span>[<span style="color:#a6e22e">User</span>]{}), <span style="color:#66d9ef">nil</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">return</span> <span style="color:#a6e22e">sqlite</span>.<span style="color:#a6e22e">New</span>[<span style="color:#a6e22e">User</span>](<span style="color:#a6e22e">sqlite</span>.<span style="color:#a6e22e">Options</span>{
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">DSN</span>:   <span style="color:#a6e22e">cfg</span>.<span style="color:#a6e22e">DatabasePath</span>,
+</span></span><span style="display:flex;"><span>        <span style="color:#a6e22e">Codec</span>: <span style="color:#f92672">&amp;</span><span style="color:#a6e22e">codec</span>.<span style="color:#a6e22e">JSON</span>{},
+</span></span><span style="display:flex;"><span>    })
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="feature-comparison">Feature Comparison</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Feature</th>
+          <th>gomap</th>
+          <th>sqlite</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Thread-safe</td>
+          <td>✅</td>
+          <td>✅</td>
+      </tr>
+      <tr>
+          <td>Watch/Subscribe</td>
+          <td>✅</td>
+          <td>✅ (in-process)</td>
+      </tr>
+      <tr>
+          <td>Validation hooks</td>
+          <td>✅</td>
+          <td>❌</td>
+      </tr>
+      <tr>
+          <td>Compare function</td>
+          <td>✅</td>
+          <td>❌ (byte comparison)</td>
+      </tr>
+      <tr>
+          <td>Persistence</td>
+          <td>❌</td>
+          <td>✅</td>
+      </tr>
+      <tr>
+          <td>Version tracking</td>
+          <td>❌</td>
+          <td>✅</td>
+      </tr>
+      <tr>
+          <td>Transactions</td>
+          <td>❌</td>
+          <td>✅</td>
+      </tr>
+      <tr>
+          <td>Cross-process watch</td>
+          <td>❌</td>
+          <td>❌</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="coming-soon">Coming Soon</h2>
+<p>Future implementations may include:</p>
+<ul>
+<li>Redis (distributed caching)</li>
+<li>PostgreSQL (production databases)</li>
+<li>etcd (distributed configuration)</li>
+</ul>
 
-	
+	<div class="section-index">
+    
+    
+    <hr class="panel-line">
+        <div class="entry">
+                <h5>
+                    <a href="/docs/implementations/gomap/">In-Memory Store (gomap)</a>
+                </h5>
+                <p>Fast in-memory store using Go maps.</p>
+            </div>
+        <div class="entry">
+                <h5>
+                    <a href="/docs/implementations/sqlite/">SQLite Store</a>
+                </h5>
+                <p>Persistent store backed by SQLite database.</p>
+            </div>
+        </div>
 </div>
-
 
           </main>
         </div>
