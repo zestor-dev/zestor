@@ -27,8 +27,54 @@ type memStore[T any] struct {
 }
 
 type watcher[T any] struct {
+	mu         sync.RWMutex
 	ch         chan *store.Event[T]
 	eventTypes map[store.EventType]struct{}
+	done       chan struct{}
+	closed     bool
+}
+
+func newWatcher[T any](bufferSize int, eventTypes map[store.EventType]struct{}) *watcher[T] {
+	return &watcher[T]{
+		ch:         make(chan *store.Event[T], bufferSize),
+		eventTypes: eventTypes,
+		done:       make(chan struct{}),
+	}
+}
+
+func (w *watcher[T]) wants(eventType store.EventType) bool {
+	if w.eventTypes == nil {
+		return true
+	}
+	_, ok := w.eventTypes[eventType]
+	return ok
+}
+
+func (w *watcher[T]) send(ev *store.Event[T]) {
+	if !w.wants(ev.EventType) {
+		return
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.closed {
+		return
+	}
+	select {
+	case <-w.done:
+	case w.ch <- ev:
+	default:
+	}
+}
+
+func (w *watcher[T]) close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return
+	}
+	w.closed = true
+	close(w.done)
+	close(w.ch)
 }
 
 func NewMemStore[T any](opt store.StoreOptions[T]) store.Store[T] {
@@ -147,12 +193,11 @@ func (s *memStore[T]) Set(kind, key string, value T) (bool, error) {
 	}
 
 	prev, existed := s.kinds[kind][key]
-	s.kinds[kind][key] = value
-
-	if s.compareFn(prev, value) {
+	if existed && s.compareFn(prev, value) {
 		s.mu.Unlock()
 		return false, nil
 	}
+	s.kinds[kind][key] = value
 
 	// copy watchers then unlock
 	wchs := make([]*watcher[T], 0, len(s.watchers[kind]))
@@ -167,16 +212,7 @@ func (s *memStore[T]) Set(kind, key string, value T) (bool, error) {
 	}
 	ev := &store.Event[T]{Kind: kind, Name: key, EventType: evType, Object: value}
 	for _, wch := range wchs {
-		if wch.eventTypes != nil {
-			if _, ok := wch.eventTypes[evType]; !ok {
-				continue
-			}
-		}
-		select {
-		case wch.ch <- ev:
-		default:
-		}
-
+		wch.send(ev)
 	}
 	return !existed, nil
 }
@@ -203,7 +239,11 @@ func (s *memStore[T]) SetAll(kind string, values map[string]T) error {
 	created := make(map[string]T)
 	updated := make(map[string]T)
 	for k, v := range values {
-		if _, existed := s.kinds[kind][k]; existed {
+		prev, existed := s.kinds[kind][k]
+		if existed && s.compareFn(prev, v) {
+			continue
+		}
+		if existed {
 			updated[k] = v
 		} else {
 			created[k] = v
@@ -219,27 +259,11 @@ func (s *memStore[T]) SetAll(kind string, values map[string]T) error {
 	s.mu.Unlock()
 
 	for _, wch := range wchs {
-		wantsCreate := wch.eventTypes == nil
-		wantsUpdate := wch.eventTypes == nil
-		if wch.eventTypes != nil {
-			_, wantsCreate = wch.eventTypes[store.EventTypeCreate]
-			_, wantsUpdate = wch.eventTypes[store.EventTypeUpdate]
+		for k, v := range created {
+			wch.send(&store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
 		}
-		if wantsCreate {
-			for k, v := range created {
-				select {
-				case wch.ch <- &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v}:
-				default:
-				}
-			}
-		}
-		if wantsUpdate {
-			for k, v := range updated {
-				select {
-				case wch.ch <- &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeUpdate, Object: v}:
-				default:
-				}
-			}
+		for k, v := range updated {
+			wch.send(&store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeUpdate, Object: v})
 		}
 	}
 	return nil
@@ -274,15 +298,7 @@ func (s *memStore[T]) Delete(kind, key string) (bool, T, error) {
 
 	ev := &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeDelete, Object: prev}
 	for _, wch := range wchs {
-		if wch.eventTypes != nil {
-			if _, ok := wch.eventTypes[store.EventTypeDelete]; !ok {
-				continue
-			}
-		}
-		select {
-		case wch.ch <- ev:
-		default:
-		}
+		wch.send(ev)
 	}
 	return existed, prev, nil
 }
@@ -305,6 +321,16 @@ func (s *memStore[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, er
 		s.mu.Unlock()
 		return false, err
 	}
+	if fn, ok := s.validationFns[kind]; ok {
+		if err := fn(value); err != nil {
+			s.mu.Unlock()
+			return false, err
+		}
+	}
+	if s.compareFn(prev, value) {
+		s.mu.Unlock()
+		return false, nil
+	}
 	// update value
 	s.kinds[kind][key] = value
 	// copy watchers then unlock
@@ -321,15 +347,7 @@ func (s *memStore[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, er
 		Object:    value,
 	}
 	for _, wch := range wchs {
-		if wch.eventTypes != nil {
-			if _, ok := wch.eventTypes[store.EventTypeUpdate]; !ok {
-				continue
-			}
-		}
-		select {
-		case wch.ch <- ev:
-		default: // no blocking
-		}
+		wch.send(ev)
 	}
 	return false, nil
 }
@@ -340,7 +358,9 @@ func (s *memStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *
 	}
 	cfg := &store.WatchCfg[T]{}
 	for _, o := range opts {
-		o(cfg)
+		if o != nil {
+			o(cfg)
+		}
 	}
 
 	s.mu.Lock()
@@ -355,10 +375,7 @@ func (s *memStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *
 		bufSize = store.DefaultWatchBufferSize
 	}
 	id := strconv.FormatUint(s.watcherID.Add(1), 10)
-	wch := &watcher[T]{
-		ch:         make(chan *store.Event[T], bufSize),
-		eventTypes: cfg.EventTypes,
-	}
+	wch := newWatcher[T](bufSize, cfg.EventTypes)
 	s.watchers[kind][id] = wch
 
 	// capture snapshot for optional initial replay
@@ -368,27 +385,17 @@ func (s *memStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *
 	}
 	s.mu.Unlock()
 
-	// used to cancel the initial snapshot goroutine
-	doneCh := make(chan struct{})
 	// send initial snapshot (nil eventTypes means all events)
-	sendInitial := wch.eventTypes == nil
-	if !sendInitial {
-		_, sendInitial = wch.eventTypes[store.EventTypeCreate]
-	}
+	sendInitial := wch.wants(store.EventTypeCreate)
 	if cfg.Initial && len(snap) > 0 && sendInitial {
 		go func(m map[string]T) {
 			for k, v := range m {
-				ev := &store.Event[T]{
+				wch.send(&store.Event[T]{
 					Kind:      kind,
 					Name:      k,
 					EventType: store.EventTypeCreate,
 					Object:    v,
-				}
-				select {
-				case wch.ch <- ev:
-				case <-doneCh:
-					return
-				}
+				})
 			}
 		}(snap)
 	}
@@ -400,8 +407,7 @@ func (s *memStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *
 		if w, ok := s.watchers[kind]; ok {
 			if wch, ok := w[id]; ok {
 				delete(w, id)
-				close(doneCh)
-				close(wch.ch)
+				wch.close()
 			}
 		}
 	}
@@ -418,7 +424,7 @@ func (s *memStore[T]) Close() error {
 	for _, m := range s.watchers {
 		for id, wch := range m {
 			delete(m, id)
-			close(wch.ch)
+			wch.close()
 		}
 	}
 	return nil

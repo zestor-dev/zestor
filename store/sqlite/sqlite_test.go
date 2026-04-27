@@ -407,6 +407,23 @@ func TestSetAll(t *testing.T) {
 	}
 }
 
+func TestSetAllEmpty(t *testing.T) {
+	s := setupStore(t)
+	defer s.Close()
+
+	if err := s.SetAll("test", map[string]TestData{}); err != nil {
+		t.Fatalf("SetAll() error = %v", err)
+	}
+
+	count, err := s.Count("test")
+	if err != nil {
+		t.Fatalf("Count() error = %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("Count() = %d, want 0", count)
+	}
+}
+
 func TestWatch(t *testing.T) {
 	s := setupStore(t)
 	defer s.Close()

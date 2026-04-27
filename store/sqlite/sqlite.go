@@ -387,15 +387,17 @@ func (s *sqLiteStore[T]) SetAll(kind string, values map[string]T) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
-			rows.Close()
 			return err
 		}
 		existingKeys[k] = struct{}{}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	stmtIns, err := tx.Prepare(`
 INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?)
@@ -609,7 +611,8 @@ func (s *sqLiteStore[T]) Dump() string {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var kind, key, value, updated string
+		var kind, key, updated string
+		var value []byte
 		var ver int
 		if err := rows.Scan(&kind, &key, &value, &ver, &updated); err == nil {
 			fmt.Fprintf(&sb, "%s/%s v%d (%dB) %s | value=%s\n", kind, key, ver, len(value), updated, string(value))
