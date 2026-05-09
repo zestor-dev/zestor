@@ -17,13 +17,15 @@ A generic, type-safe, in-memory key-value store for Go with watch/subscribe capa
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.25+
 
 ## Installation
 
 ```bash
 go get github.com/zestor-dev/zestor
 ```
+
+Besides [`store/gomap`](store/gomap/), optional backends include [`store/sqlite`](store/sqlite/) (embedded file) and [`store/postgres`](store/postgres/) (PostgreSQL with cross-process watch).
 
 ## Quick Start
 

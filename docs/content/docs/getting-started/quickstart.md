@@ -10,7 +10,7 @@ This guide walks you through building a simple application using Zestor.
 
 ## Create a Store
 
-First, define your data type and create a store. Zestor offers two implementations:
+First, define your data type and create a store. Zestor ships several implementations; three common ones are below.
 
 ### In-Memory Store (gomap)
 
@@ -70,7 +70,41 @@ func main() {
 }
 ```
 
-Both implementations share the same `store.Store[T]` interface, so all operations below work identically.
+### PostgreSQL Store (postgres)
+
+Best for: server apps, multiple replicas, shared durable state with `Watch` across processes.
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+
+    "github.com/zestor-dev/zestor/codec"
+    "github.com/zestor-dev/zestor/store/postgres"
+)
+
+type User struct {
+    Name  string `json:"name"`
+    Email string `json:"email"`
+    Role  string `json:"role"`
+}
+
+func main() {
+    s, err := postgres.New[User](postgres.Options{
+        ConnString: "postgresql://user:pass@localhost:5432/myapp?sslmode=disable",
+        Codec:      &codec.JSON{},
+        Timeout:    10 * time.Second,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer s.Close()
+}
+```
+
+All of these implementations share the same `store.Store[T]` interface, so the operations below work the same way.
 
 ## Basic CRUD Operations
 
@@ -252,7 +286,7 @@ func main() {
 ## Next Steps
 
 - Learn about [Concepts](/docs/concepts/) like kinds, validation, and interface segregation
-- See [Implementations](/docs/implementations/) for gomap and sqlite details
+- See [Implementations](/docs/implementations/) for gomap, sqlite, and postgres details
 - Learn about [Codecs](/docs/concepts/codec/) for serialization
 - Explore the full [API Reference](/docs/api/)
 

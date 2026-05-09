@@ -8,7 +8,7 @@ description: >
 
 ## Requirements
 
-- Go 1.21 or later
+- Go 1.25 or later
 
 ## Install via Go Modules
 
@@ -39,6 +39,16 @@ import (
 )
 ```
 
+For PostgreSQL (server-backed persistence and cross-process watch):
+
+```go
+import (
+    "github.com/zestor-dev/zestor/store"
+    "github.com/zestor-dev/zestor/store/postgres"
+    "github.com/zestor-dev/zestor/codec"
+)
+```
+
 ### Package Overview
 
 | Package | Description |
@@ -46,6 +56,7 @@ import (
 | `store` | Core interfaces, types, and options |
 | `store/gomap` | In-memory implementation |
 | `store/sqlite` | SQLite-backed persistent implementation |
+| `store/postgres` | PostgreSQL-backed implementation |
 | `codec` | Serialization codecs (JSON, Protobuf, YAML) |
 
 ## Verify Installation
