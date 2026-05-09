@@ -1,4 +1,4 @@
-.PHONY: test test-all test-root test-codec integration-test test-sqlite
+.PHONY: test test-all test-root test-codec integration-test test-sqlite test-postgres
 
 GO ?= go
 
@@ -12,7 +12,10 @@ test-root:
 test-codec:
 	cd codec && $(GO) test ./...
 
-integration-test: test-sqlite
+integration-test: test-sqlite test-postgres
 
 test-sqlite:
 	cd store/sqlite && $(GO) test ./...
+
+test-postgres:
+	cd store/postgres && $(GO) test ./...

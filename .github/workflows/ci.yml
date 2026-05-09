@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit (root, codec, sqlite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            codec/go.sum
+            store/sqlite/go.sum
+
+      - name: Root module (store, gomap, examples)
+        run: go test -count=1 -race ./...
+
+      - name: Codec module
+        working-directory: codec
+        run: go test -count=1 -race ./...
+
+      - name: SQLite store module
+        working-directory: store/sqlite
+        run: go test -count=1 -race ./...
+
+  postgres-store:
+    name: PostgreSQL store
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 4s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      POSTGRES_CONN: postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: store/postgres/go.sum
+
+      - name: Postgres store module
+        working-directory: store/postgres
+        run: go test -count=1 -race ./...
+
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [unit, postgres-store]
+    if: always()
+    steps:
+      - name: OK
+        run: |
+          if [[ "${{ needs.unit.result }}" != "success" ]] || [[ "${{ needs.postgres-store.result }}" != "success" ]]; then
+            echo "unit: ${{ needs.unit.result }}, postgres-store: ${{ needs.postgres-store.result }}"
+            exit 1
+          fi
+          echo "All jobs passed."
