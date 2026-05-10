@@ -48,6 +48,9 @@ type storePG[T any] struct {
 
 	mu     sync.RWMutex
 	closed bool
+
+	listenCancel context.CancelFunc
+	listenWG     sync.WaitGroup
 }
 
 // New opens a pool, ensures schema, starts the LISTEN loop, and returns a Store[T].
@@ -73,19 +76,26 @@ func New[T any](o Options) (store.Store[T], error) {
 		return nil, err
 	}
 
+	listCtx, listenCancel := context.WithCancel(context.Background())
 	s := &storePG[T]{
-		pool:    pool,
-		codec:   o.Codec,
-		ns:      o.Namespace,
-		timeout: o.Timeout,
-		subs:    make(map[string]map[*watcher[T]]struct{}),
+		pool:         pool,
+		codec:        o.Codec,
+		ns:           o.Namespace,
+		timeout:      o.Timeout,
+		subs:         make(map[string]map[*watcher[T]]struct{}),
+		listenCancel: listenCancel,
 	}
 	if err := s.ensureSchema(context.Background()); err != nil {
+		listenCancel()
 		pool.Close()
 		return nil, err
 	}
 
-	go s.listenLoop()
+	s.listenWG.Add(1)
+	go func() {
+		defer s.listenWG.Done()
+		s.listenLoop(listCtx)
+	}()
 
 	return s, nil
 }
@@ -420,7 +430,7 @@ func (s *storePG[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, err
 	var curBytes []byte
 	var cur T
 	err = tx.QueryRow(ctx,
-		`SELECT value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 AND key=$3`,
+		`SELECT value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 AND key=$3 FOR UPDATE`,
 		s.ns, kind, key).Scan(&curBytes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, store.ErrKeyNotFound
@@ -633,20 +643,20 @@ func (s *storePG[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *s
 			}
 			for k, v := range m {
 				ev := &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v}
-				s.muSubs.RLock()
+				s.muSubs.Lock()
 				if s.subs[kind] == nil {
-					s.muSubs.RUnlock()
+					s.muSubs.Unlock()
 					return
 				}
 				if _, subscribed := s.subs[kind][w]; !subscribed {
-					s.muSubs.RUnlock()
+					s.muSubs.Unlock()
 					return
 				}
-				s.muSubs.RUnlock()
 				select {
 				case w.ch <- ev:
 				default:
 				}
+				s.muSubs.Unlock()
 			}
 		}()
 	}
@@ -671,7 +681,7 @@ type drainState struct {
 	running bool
 }
 
-func (s *storePG[T]) listenLoop() {
+func (s *storePG[T]) listenLoop(ctx context.Context) {
 	var (
 		mu     sync.Mutex
 		lastID = make(map[string]int64)
@@ -744,6 +754,11 @@ SELECT id, key, etype, value
 					}
 					mu.Unlock()
 				}
+				if err := rows.Err(); err != nil {
+					rows.Close()
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
 				rows.Close()
 
 				if !done {
@@ -754,7 +769,7 @@ SELECT id, key, etype, value
 	}
 
 	backoff := 200 * time.Millisecond
-	for {
+	for ctx.Err() == nil {
 		s.mu.RLock()
 		closed := s.closed
 		s.mu.RUnlock()
@@ -762,9 +777,11 @@ SELECT id, key, etype, value
 			return
 		}
 
-		ctx := context.Background()
 		acq, err := s.pool.Acquire(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			time.Sleep(backoff)
 			backoff = minDur(backoff*2, 5*time.Second)
 			continue
@@ -774,18 +791,24 @@ SELECT id, key, etype, value
 
 		if _, err := conn.Exec(ctx, `UNLISTEN *`); err != nil {
 			acq.Release()
+			if ctx.Err() != nil {
+				return
+			}
 			time.Sleep(backoff)
 			backoff = minDur(backoff*2, 5*time.Second)
 			continue
 		}
 		if _, err := conn.Exec(ctx, `LISTEN zestor_events`); err != nil {
 			acq.Release()
+			if ctx.Err() != nil {
+				return
+			}
 			time.Sleep(backoff)
 			backoff = minDur(backoff*2, 5*time.Second)
 			continue
 		}
 
-		for {
+		for ctx.Err() == nil {
 			s.mu.RLock()
 			closed := s.closed
 			s.mu.RUnlock()
@@ -799,6 +822,9 @@ SELECT id, key, etype, value
 			cancel()
 			if err != nil {
 				acq.Release()
+				if ctx.Err() != nil {
+					return
+				}
 				break
 			}
 			if ntf == nil {
@@ -814,6 +840,9 @@ SELECT id, key, etype, value
 			triggerDrain(kind)
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
 		time.Sleep(backoff)
 		backoff = minDur(backoff*2, 5*time.Second)
 	}
@@ -876,6 +905,10 @@ func (s *storePG[T]) Close() error {
 	s.subs = nil
 	s.muSubs.Unlock()
 
+	if s.listenCancel != nil {
+		s.listenCancel()
+	}
+	s.listenWG.Wait()
 	s.pool.Close()
 	return nil
 }

@@ -1,0 +1,24 @@
+# Local PostgreSQL for development and store/postgres tests (matches CI defaults).
+# Usage: docker compose up -d
+# Then: export POSTGRES_CONN='postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable'
+# Or run: make test-postgres (uses the default DSN when POSTGRES_CONN is unset).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - zestor-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 4s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zestor-postgres-data:

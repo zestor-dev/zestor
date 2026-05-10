@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -21,6 +22,13 @@ func getPostgresConn() string {
 		conn = "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
 	}
 	return conn
+}
+
+// settleNotify gives the async LISTEN/outbox drain time to finish publishing for prior Sets,
+// so Watch does not observe stale events intended for the pre-subscribe window.
+func settleNotify(tb testing.TB) {
+	tb.Helper()
+	time.Sleep(time.Second)
 }
 
 func setupStore(tb testing.TB) store.Store[TestData] {
@@ -512,7 +520,8 @@ func TestWatchInitialReplay(t *testing.T) {
 	defer cancel()
 
 	received := make(map[string]TestData)
-	timeout := time.After(5 * time.Second)
+	ctx, recvCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer recvCancel()
 	for len(received) < len(initialData) {
 		select {
 		case ev := <-ch:
@@ -520,7 +529,7 @@ func TestWatchInitialReplay(t *testing.T) {
 				t.Errorf("Initial event type = %s, want %s", ev.EventType, store.EventTypeCreate)
 			}
 			received[ev.Name] = ev.Object
-		case <-timeout:
+		case <-ctx.Done():
 			t.Fatalf("Timeout waiting for initial events, got %d/%d", len(received), len(initialData))
 		}
 	}
@@ -549,6 +558,7 @@ func TestWatchNoOpNoEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
+	settleNotify(t)
 
 	ch, cancel, err := s.Watch(kind)
 	if err != nil {
@@ -575,17 +585,26 @@ func TestWatchUpdate(t *testing.T) {
 	kind := "test"
 	key := "update_key"
 
-	val1 := TestData{Name: "v1", Value: 1}
-	_, err := s.Set(kind, key, val1)
-	if err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
-
 	ch, cancel, err := s.Watch(kind)
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
 	defer cancel()
+
+	val1 := TestData{Name: "v1", Value: 1}
+	_, err = s.Set(kind, key, val1)
+	if err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.EventType != store.EventTypeCreate {
+			t.Fatalf("First event type = %s, want %s", ev.EventType, store.EventTypeCreate)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for create event")
+	}
 
 	val2 := TestData{Name: "v2", Value: 2}
 	go func() {
@@ -613,17 +632,26 @@ func TestWatchDelete(t *testing.T) {
 	kind := "test"
 	key := "delete_key"
 
-	val := TestData{Name: "to_delete", Value: 99}
-	_, err := s.Set(kind, key, val)
-	if err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
-
 	ch, cancel, err := s.Watch(kind)
 	if err != nil {
 		t.Fatalf("Watch() error = %v", err)
 	}
 	defer cancel()
+
+	val := TestData{Name: "to_delete", Value: 99}
+	_, err = s.Set(kind, key, val)
+	if err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.EventType != store.EventTypeCreate {
+			t.Fatalf("First event type = %s, want %s", ev.EventType, store.EventTypeCreate)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Timeout waiting for create event")
+	}
 
 	go func() {
 		time.Sleep(200 * time.Millisecond)

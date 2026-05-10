@@ -1,4 +1,5 @@
-.PHONY: test test-all test-root test-codec integration-test test-sqlite test-postgres
+.PHONY: test test-all test-root test-codec integration-test test-sqlite test-postgres \
+	postgres-up postgres-down postgres-logs
 
 GO ?= go
 
@@ -19,3 +20,12 @@ test-sqlite:
 
 test-postgres:
 	cd store/postgres && $(GO) test ./...
+
+postgres-up:
+	docker compose up -d postgres
+
+postgres-down:
+	docker compose down
+
+postgres-logs:
+	docker compose logs -f postgres
