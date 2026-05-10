@@ -51,6 +51,11 @@ type storePG[T any] struct {
 
 	listenCancel context.CancelFunc
 	listenWG     sync.WaitGroup
+
+	// Closed after the first successful LISTEN so callers do not mutate before
+	// NOTIFY delivery is possible (PostgreSQL drops NOTIFY if no session is listening yet).
+	listenReady     chan struct{}
+	listenReadyOnce sync.Once
 }
 
 // New opens a pool, ensures schema, starts the LISTEN loop, and returns a Store[T].
@@ -84,6 +89,7 @@ func New[T any](o Options) (store.Store[T], error) {
 		timeout:      o.Timeout,
 		subs:         make(map[string]map[*watcher[T]]struct{}),
 		listenCancel: listenCancel,
+		listenReady:  make(chan struct{}),
 	}
 	if err := s.ensureSchema(context.Background()); err != nil {
 		listenCancel()
@@ -96,6 +102,17 @@ func New[T any](o Options) (store.Store[T], error) {
 		defer s.listenWG.Done()
 		s.listenLoop(listCtx)
 	}()
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), o.Timeout)
+	defer waitCancel()
+	select {
+	case <-s.listenReady:
+	case <-waitCtx.Done():
+		listenCancel()
+		s.listenWG.Wait()
+		pool.Close()
+		return nil, fmt.Errorf("postgres: listen loop did not become ready within %v", o.Timeout)
+	}
 
 	return s, nil
 }
@@ -681,6 +698,12 @@ type drainState struct {
 	running bool
 }
 
+func (s *storePG[T]) signalListenReady() {
+	s.listenReadyOnce.Do(func() {
+		close(s.listenReady)
+	})
+}
+
 func (s *storePG[T]) listenLoop(ctx context.Context) {
 	var (
 		mu     sync.Mutex
@@ -807,6 +830,7 @@ SELECT id, key, etype, value
 			backoff = minDur(backoff*2, 5*time.Second)
 			continue
 		}
+		s.signalListenReady()
 
 		for ctx.Err() == nil {
 			s.mu.RLock()
