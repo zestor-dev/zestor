@@ -725,7 +725,9 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 		st.running = true
 		mu.Unlock()
 
+		s.listenWG.Add(1)
 		go func(k string) {
+			defer s.listenWG.Done()
 			defer func() {
 				mu.Lock()
 				state[k].running = false
@@ -734,32 +736,43 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 
 			const batch = 256
 			for {
+				if ctx.Err() != nil {
+					return
+				}
 				mu.Lock()
 				cursor := lastID[k]
 				mu.Unlock()
 
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				rows, err := s.pool.Query(ctx, `
+				qctx, qcancel := context.WithTimeout(ctx, 10*time.Second)
+				rows, err := s.pool.Query(qctx, `
 SELECT id, key, etype, value
   FROM zestor_outbox
  WHERE ns_id=$1 AND kind=$2 AND id > $3
  ORDER BY id
  LIMIT $4`, s.ns, k, cursor, batch)
-				cancel()
 				if err != nil {
-					time.Sleep(200 * time.Millisecond)
+					qcancel()
+					if ctx.Err() != nil {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(200 * time.Millisecond):
+					}
 					continue
 				}
 
 				var done bool
+				var iterErr error
 				for rows.Next() {
 					done = true
 					var id int64
 					var name, etype string
 					var val []byte
 					if err := rows.Scan(&id, &name, &etype, &val); err != nil {
-						rows.Close()
-						return
+						iterErr = err
+						break
 					}
 					var obj T
 					_ = s.codec.Unmarshal(val, &obj)
@@ -777,12 +790,23 @@ SELECT id, key, etype, value
 					}
 					mu.Unlock()
 				}
-				if err := rows.Err(); err != nil {
-					rows.Close()
-					time.Sleep(200 * time.Millisecond)
-					continue
+				if iterErr == nil {
+					iterErr = rows.Err()
 				}
 				rows.Close()
+				qcancel()
+
+				if iterErr != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(200 * time.Millisecond):
+					}
+					continue
+				}
 
 				if !done {
 					return
@@ -832,43 +856,52 @@ SELECT id, key, etype, value
 		}
 		s.signalListenReady()
 
-		for ctx.Err() == nil {
-			s.mu.RLock()
-			closed := s.closed
-			s.mu.RUnlock()
-			if closed {
-				acq.Release()
-				return
-			}
-
-			waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			ntf, err := conn.WaitForNotification(waitCtx)
-			cancel()
-			if err != nil {
-				acq.Release()
+		// reacquire indicates the connection should be re-acquired (e.g. after a
+		// WaitForNotification error). exitLoop indicates a clean shutdown of the
+		// outer loop. In all cases we must Release acq exactly once via this block.
+		exitLoop, reacquire := func() (bool, bool) {
+			defer acq.Release()
+			for {
 				if ctx.Err() != nil {
-					return
+					return true, false
 				}
-				break
-			}
-			if ntf == nil {
-				continue
-			}
-			ns, kind, _, _, _, perr := parsePayload(ntf.Payload)
-			if perr != nil {
-				continue
-			}
-			if ns != s.ns {
-				continue
-			}
-			triggerDrain(kind)
-		}
+				s.mu.RLock()
+				closed := s.closed
+				s.mu.RUnlock()
+				if closed {
+					return true, false
+				}
 
-		if ctx.Err() != nil {
+				waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+				ntf, err := conn.WaitForNotification(waitCtx)
+				cancel()
+				if err != nil {
+					if ctx.Err() != nil {
+						return true, false
+					}
+					return false, true
+				}
+				if ntf == nil {
+					continue
+				}
+				ns, kind, _, _, _, perr := parsePayload(ntf.Payload)
+				if perr != nil {
+					continue
+				}
+				if ns != s.ns {
+					continue
+				}
+				triggerDrain(kind)
+			}
+		}()
+		if exitLoop {
 			return
 		}
-		time.Sleep(backoff)
-		backoff = minDur(backoff*2, 5*time.Second)
+		if reacquire {
+			time.Sleep(backoff)
+			backoff = minDur(backoff*2, 5*time.Second)
+			continue
+		}
 	}
 }
 

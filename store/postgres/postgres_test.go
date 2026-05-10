@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,12 +17,56 @@ type TestData struct {
 	Value int    `json:"value"`
 }
 
-func getPostgresConn() string {
-	conn := os.Getenv("POSTGRES_CONN")
-	if conn == "" {
-		conn = "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+// postgresConnEnv returns the DSN and whether POSTGRES_CONN was set in the environment
+// (as opposed to using the implicit localhost default).
+func postgresConnEnv() (conn string, envExplicit bool) {
+	conn = strings.TrimSpace(os.Getenv("POSTGRES_CONN"))
+	if conn != "" {
+		return conn, true
 	}
+	return "postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable", false
+}
+
+func getPostgresConn() string {
+	conn, _ := postgresConnEnv()
 	return conn
+}
+
+// postgresMustConnect is true when a failed dial should fail the test rather than skip:
+// - POSTGRES_CONN is set, or
+// - POSTGRES_REQUIRE is set to a truthy value (e.g. make test-postgres uses this).
+// Set POSTGRES_REQUIRE=0|false|no|off to force skips even when POSTGRES_CONN is set.
+func postgresMustConnect() bool {
+	flag := strings.TrimSpace(os.Getenv("POSTGRES_REQUIRE"))
+	if flag != "" {
+		switch strings.ToLower(flag) {
+		case "0", "false", "no", "off":
+			return false
+		default:
+			return true
+		}
+	}
+	_, explicit := postgresConnEnv()
+	return explicit
+}
+
+type failOrSkip interface {
+	Helper()
+	Fatalf(format string, args ...any)
+	Skipf(format string, args ...any)
+}
+
+func reportPostgresErr(tb failOrSkip, err error) {
+	tb.Helper()
+	if postgresMustConnect() {
+		tb.Fatalf(
+			"postgres required but unreachable: %v\n"+
+				"Use a reachable DSN (POSTGRES_CONN), publish Postgres to the host from Compose (e.g. ports \"5432:5432\"), "+
+				"or unset POSTGRES_REQUIRE and POSTGRES_CONN to allow skips when localhost:5432 is closed.",
+			err,
+		)
+	}
+	tb.Skipf("postgres unavailable: %v", err)
 }
 
 // settleNotify gives the async LISTEN/outbox drain time to finish publishing for prior Sets,
@@ -40,7 +85,7 @@ func setupStore(tb testing.TB) store.Store[TestData] {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		tb.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(tb, err)
 	}
 	return s
 }
@@ -79,7 +124,7 @@ func TestNew(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s, err := New[TestData](tt.opts)
 			if !tt.wantErr && err != nil {
-				t.Skipf("postgres unavailable: %v", err)
+				reportPostgresErr(t, err)
 			}
 			if (err != nil) != tt.wantErr {
 				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
@@ -759,7 +804,7 @@ func TestPersistence(t *testing.T) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		t.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(t, err)
 	}
 
 	kind := "persist"
@@ -778,7 +823,7 @@ func TestPersistence(t *testing.T) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("Failed to reopen store: %v", err)
+		reportPostgresErr(t, err)
 	}
 	defer s2.Close()
 
@@ -804,7 +849,7 @@ func TestNamespaceIsolation(t *testing.T) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		t.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(t, err)
 	}
 	defer s1.Close()
 
@@ -815,7 +860,7 @@ func TestNamespaceIsolation(t *testing.T) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("Failed to create store2: %v", err)
+		reportPostgresErr(t, err)
 	}
 	defer s2.Close()
 
@@ -901,7 +946,7 @@ func BenchmarkSet(b *testing.B) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		b.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(b, err)
 	}
 	defer s.Close()
 
@@ -923,7 +968,7 @@ func BenchmarkGet(b *testing.B) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		b.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(b, err)
 	}
 	defer s.Close()
 
@@ -946,7 +991,7 @@ func BenchmarkSetFn(b *testing.B) {
 		Timeout:    30 * time.Second,
 	})
 	if err != nil {
-		b.Skipf("postgres unavailable: %v", err)
+		reportPostgresErr(b, err)
 	}
 	defer s.Close()
 
