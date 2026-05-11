@@ -29,7 +29,7 @@ Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subs
 
 ## Requirements
 
-- Go 1.21 or later
+- Go 1.25 or later
 
 ## Installation
 

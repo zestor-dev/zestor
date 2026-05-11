@@ -14,6 +14,7 @@ Zestor provides multiple store implementations, all sharing the same `store.Stor
 |---------------|---------|-------------|----------|
 | [gomap](gomap/) | Memory | ❌ Ephemeral | Caching, testing, high-speed access |
 | [sqlite](sqlite/) | SQLite file | ✅ Persistent | Desktop apps, CLI tools, embedded |
+| [postgres](postgres/) | PostgreSQL | ✅ Persistent | Servers, multi-instance apps, shared watch |
 
 ## Choosing an Implementation
 
@@ -30,6 +31,12 @@ Zestor provides multiple store implementations, all sharing the same `store.Stor
 - You need ACID transactions
 - Building desktop or CLI applications
 - Single-file deployment is important
+
+### Use postgres when:
+
+- A PostgreSQL server is already part of your stack
+- Multiple processes or replicas should share state and receive `Watch` notifications
+- You want multi-tenant isolation via namespaces (`ns_id`)
 
 ## Interface Compatibility
 
@@ -49,16 +56,26 @@ processUsers(memStore)
 // SQLite
 sqlStore, _ := sqlite.New[User](sqlOpts)
 processUsers(sqlStore)
+
+// PostgreSQL
+pgStore, _ := postgres.New[User](pgOpts)
+processUsers(pgStore)
 ```
 
 ## Swapping Implementations
 
-A common pattern is using gomap for tests and sqlite for production:
+A common pattern is using gomap for tests and sqlite or postgres for production:
 
 ```go
 func NewStore(cfg Config) (store.Store[User], error) {
     if cfg.Testing {
         return gomap.NewMemStore[User](store.StoreOptions[User]{}), nil
+    }
+    if cfg.DatabaseURL != "" {
+        return postgres.New[User](postgres.Options{
+            ConnString: cfg.DatabaseURL,
+            Codec:      &codec.JSON{},
+        })
     }
     return sqlite.New[User](sqlite.Options{
         DSN:   cfg.DatabasePath,
@@ -69,22 +86,21 @@ func NewStore(cfg Config) (store.Store[User], error) {
 
 ## Feature Comparison
 
-| Feature | gomap | sqlite |
-|---------|-------|--------|
-| Thread-safe | ✅ | ✅ |
-| Watch/Subscribe | ✅ | ✅ (in-process) |
-| Validation hooks | ✅ | ❌ |
-| Compare function | ✅ | ❌ (byte comparison) |
-| Persistence | ❌ | ✅ |
-| Version tracking | ❌ | ✅ |
-| Transactions | ❌ | ✅ |
-| Cross-process watch | ❌ | ❌ |
+| Feature | gomap | sqlite | postgres |
+|---------|-------|--------|----------|
+| Thread-safe | ✅ | ✅ | ✅ |
+| Watch/Subscribe | ✅ | ✅ (in-process) | ✅ (cross-process via NOTIFY + outbox) |
+| Validation hooks | ✅ | ❌ | ❌ |
+| Compare function | ✅ | ❌ (byte comparison) | ❌ (byte comparison) |
+| Persistence | ❌ | ✅ | ✅ |
+| Version tracking | ❌ | ✅ | ✅ |
+| Transactions | ❌ | ✅ | ✅ |
+| Cross-process watch | ❌ | ❌ | ✅ |
 
 ## Coming Soon
 
 Future implementations may include:
-- Redis (distributed caching)
-- PostgreSQL (production databases)
-- etcd (distributed configuration)
 
+- Redis (distributed caching)
+- etcd (distributed configuration)
 

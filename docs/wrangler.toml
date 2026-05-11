@@ -1,0 +1,12 @@
+# Cloudflare Pages — config in repo (Wrangler / unified Workers–Pages model).
+# After adding this file, link it from the Pages project (see README) so vars apply to builds.
+#
+# Build command is still set in the dashboard unless you switch it to: npm run build
+
+name = "zestor-docs"
+pages_build_output_dir = "public"
+
+# Pins the preinstalled Hugo CLI used when your build command invokes `hugo ...`.
+# Fixes Docsy i18n with Hugo < 0.152 ("unsupported file format bool" on Yes/No).
+[vars]
+HUGO_VERSION = "0.152.2"

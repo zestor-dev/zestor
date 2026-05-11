@@ -1,6 +1,16 @@
 {
+  "name": "zestor-docs",
+  "private": true,
+  "hugo-bin": {
+    "buildTags": "extended",
+    "version": "0.152.2"
+  },
+  "scripts": {
+    "build": "hugo -b \"${CF_PAGES_URL:-https://docs.zestor.dev/}\" --minify"
+  },
   "devDependencies": {
     "autoprefixer": "^10.4.23",
+    "hugo-bin": "^0.149.2",
     "postcss": "^8.5.6",
     "postcss-cli": "^11.0.1"
   }

@@ -1,0 +1,27 @@
+# Local PostgreSQL for development and store/postgres tests (matches CI defaults).
+# Host processes (go test on your machine) need a published port: keep "5432:5432" below.
+# If you remove ports or only attach internal networks, localhost will refuse connections.
+#
+# Usage: docker compose up -d
+# Then: export POSTGRES_CONN='postgresql://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable'
+# Or: make test-postgres  (sets POSTGRES_REQUIRE=1 so unreachable Postgres fails instead of skipping)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - zestor-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 4s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zestor-postgres-data:
