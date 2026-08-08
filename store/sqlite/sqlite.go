@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/zestor-dev/zestor/codec"
 	"github.com/zestor-dev/zestor/store"
+	"github.com/zestor-dev/zestor/store/internal/watchhub"
 )
 
 const (
@@ -24,7 +27,7 @@ CREATE TABLE IF NOT EXISTS zestor_kv (
   value      BLOB    NOT NULL,
   version    INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT    NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')),
-  PRIMARY KEY(kind, key)	
+  PRIMARY KEY(kind, key)
 );
 CREATE INDEX IF NOT EXISTS idx_kv_kind ON zestor_kv(kind);
 `
@@ -35,6 +38,11 @@ CREATE INDEX IF NOT EXISTS idx_kv_kind ON zestor_kv(kind);
 	keysQuery   = `SELECT key FROM zestor_kv WHERE kind=?;`
 	valuesQuery = `SELECT key, value FROM zestor_kv WHERE kind=?;`
 	setQuery    = `INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?) ON CONFLICT(kind,key) DO NOTHING;`
+
+	updateQuery = `
+UPDATE zestor_kv
+SET value=?, version=version+1, updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE kind=? AND key=?;`
 )
 
 type Options struct {
@@ -52,18 +60,18 @@ type Options struct {
 	DisableWAL bool
 }
 
-type watcher[T any] struct {
-	ch         chan *store.Event[T]
-	eventTypes map[store.EventType]struct{}
-}
-
 type sqLiteStore[T any] struct {
 	db    *sql.DB
 	codec codec.Codec
 
-	// in-proc pubsub for Watch(kind)
-	muSubs sync.RWMutex
-	subs   map[string]map[*watcher[T]]struct{}
+	// writeMu serializes writes with their event publication. SQLite already
+	// admits one writer at a time, so this costs nothing real, and it is what
+	// makes queue order match commit order for watchers. Watch takes it too, so
+	// an initial-replay snapshot cannot interleave with a concurrent write.
+	//
+	// Lock order is always writeMu -> hub.
+	writeMu sync.Mutex
+	hub     *watchhub.Hub[T]
 
 	// closed flag
 	mu     sync.RWMutex
@@ -71,7 +79,7 @@ type sqLiteStore[T any] struct {
 }
 
 // New creates/opens the DB, applies the schema, and returns a Store[T].
-func New[T any](o Options) (store.Store[T], error) {
+func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	if o.DSN == "" {
 		return nil, errors.New("sqlite: Options.DSN is required")
 	}
@@ -84,7 +92,6 @@ func New[T any](o Options) (store.Store[T], error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
 	if !o.DisableWAL {
 		if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
 			_ = db.Close()
@@ -108,21 +115,32 @@ func New[T any](o Options) (store.Store[T], error) {
 	return &sqLiteStore[T]{
 		db:    db,
 		codec: o.Codec,
-		subs:  make(map[string]map[*watcher[T]]struct{}),
+		hub:   watchhub.New[T](),
 	}, nil
 }
 
-func (s *sqLiteStore[T]) Get(kind, key string) (T, bool, error) {
-	var zero T
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return zero, false, store.ErrClosed
+// guard rejects operations on a closed store, and honours an already-cancelled
+// context before doing any I/O.
+func (s *sqLiteStore[T]) guard(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	s.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return store.ErrClosed
+	}
+	return nil
+}
+
+func (s *sqLiteStore[T]) Get(ctx context.Context, kind, key string) (T, bool, error) {
+	var zero T
+	if err := s.guard(ctx); err != nil {
+		return zero, false, err
+	}
 
 	var blob []byte
-	row := s.db.QueryRow(getQuery, kind, key)
+	row := s.db.QueryRowContext(ctx, getQuery, kind, key)
 	if err := row.Scan(&blob); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return zero, false, nil
@@ -136,21 +154,18 @@ func (s *sqLiteStore[T]) Get(kind, key string) (T, bool, error) {
 	return v, true, nil
 }
 
-func (s *sqLiteStore[T]) List(kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *sqLiteStore[T]) List(ctx context.Context, kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
+	if err := s.guard(ctx); err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
 
-	out := make(map[string]T, 64)
-	rows, err := s.db.Query(listQuery, kind)
+	rows, err := s.db.QueryContext(ctx, listQuery, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	out := make(map[string]T)
 	for rows.Next() {
 		var k string
 		var blob []byte
@@ -175,36 +190,30 @@ func (s *sqLiteStore[T]) List(kind string, filter ...store.FilterFunc[T]) (map[s
 	return out, rows.Err()
 }
 
-func (s *sqLiteStore[T]) Count(kind string) (int, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return 0, store.ErrClosed
+func (s *sqLiteStore[T]) Count(ctx context.Context, kind string) (int, error) {
+	if err := s.guard(ctx); err != nil {
+		return 0, err
 	}
-	s.mu.RUnlock()
 
 	var n int
-	if err := s.db.QueryRow(countQuery, kind).Scan(&n); err != nil {
+	if err := s.db.QueryRowContext(ctx, countQuery, kind).Scan(&n); err != nil {
 		return 0, err
 	}
 	return n, nil
 }
 
-func (s *sqLiteStore[T]) Keys(kind string) ([]string, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *sqLiteStore[T]) Keys(ctx context.Context, kind string) ([]string, error) {
+	if err := s.guard(ctx); err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
 
-	rows, err := s.db.Query(keysQuery, kind)
+	rows, err := s.db.QueryContext(ctx, keysQuery, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	keys := make([]string, 0, 64)
+	keys := make([]string, 0)
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
@@ -215,21 +224,18 @@ func (s *sqLiteStore[T]) Keys(kind string) ([]string, error) {
 	return keys, rows.Err()
 }
 
-func (s *sqLiteStore[T]) Values(kind string) ([]store.KeyValue[T], error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[T], error) {
+	if err := s.guard(ctx); err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
 
-	rows, err := s.db.Query(valuesQuery, kind)
+	rows, err := s.db.QueryContext(ctx, valuesQuery, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make([]store.KeyValue[T], 0, 64)
+	out := make([]store.KeyValue[T], 0)
 	for rows.Next() {
 		var k string
 		var blob []byte
@@ -245,95 +251,104 @@ func (s *sqLiteStore[T]) Values(kind string) ([]store.KeyValue[T], error) {
 	return out, rows.Err()
 }
 
-func (s *sqLiteStore[T]) Set(kind, key string, value T) (bool, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, store.ErrClosed
+func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (bool, error) {
+	if err := s.guard(ctx); err != nil {
+		return false, err
 	}
-	s.mu.RUnlock()
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
 		return false, err
 	}
 
-	// to figure out if this was a create or update.
-	// try INSERT: if conflict -> UPDATE.
-	tx, err := s.db.Begin()
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rollbackIfNeeded(tx, &err) }()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	res, err := tx.Exec(setQuery, kind, key, enc)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	createdRows, _ := res.RowsAffected()
-	created := createdRows > 0
+	// Rollback is driven by an explicit flag rather than by inspecting a named
+	// error: every `if err := ...` below shadows the outer err, so anything that
+	// keys off err would silently skip the rollback and leak the transaction —
+	// which in SQLite means holding the write lock for the life of the process.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Try INSERT; on conflict the row exists and we decide whether to update.
+	res, err := tx.ExecContext(ctx, setQuery, kind, key, enc)
+	if err != nil {
+		return false, err
+	}
+	inserted, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	created := inserted > 0
 
 	if !created {
-		// update only if bytes changed then bump version if changed
 		var cur []byte
-		row := tx.QueryRow(getQuery, kind, key)
-		if err := row.Scan(&cur); err != nil {
+		if err := tx.QueryRowContext(ctx, getQuery, kind, key).Scan(&cur); err != nil {
 			return false, err
 		}
 		if bytes.Equal(cur, enc) {
-			// No-op
-			if err = tx.Commit(); err != nil {
+			if err := tx.Commit(); err != nil {
 				return false, err
 			}
+			committed = true
 			return false, nil
 		}
-		if _, err := tx.Exec(`
-UPDATE zestor_kv
-SET value=?, version=version+1, updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
-WHERE kind=? AND key=?;`, enc, kind, key); err != nil {
+		if _, err := tx.ExecContext(ctx, updateQuery, enc, kind, key); err != nil {
 			return false, err
 		}
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
+	committed = true
 
 	etype := store.EventTypeUpdate
 	if created {
 		etype = store.EventTypeCreate
 	}
-	s.publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: etype, Object: value})
+	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: etype, Object: value})
 	return created, nil
 }
 
-func (s *sqLiteStore[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, store.ErrClosed
+func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
+	if err := s.guard(ctx); err != nil {
+		return false, err
 	}
-	s.mu.RUnlock()
 
-	tx, err := s.db.Begin()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = rollbackIfNeeded(tx, &err) }()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 
-	var cur T
 	var curBytes []byte
-	row := tx.QueryRow(getQuery, kind, key)
-	scanErr := row.Scan(&curBytes)
-	if errors.Is(scanErr, sql.ErrNoRows) {
-		_ = tx.Rollback()
-		return false, store.ErrKeyNotFound
+	if err := tx.QueryRowContext(ctx, getQuery, kind, key).Scan(&curBytes); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, store.ErrKeyNotFound
+		}
+		return false, err
 	}
-	if scanErr != nil {
-		return false, scanErr
-	}
-	if err2 := s.codec.Unmarshal(curBytes, &cur); err2 != nil {
-		return false, err2
+	var cur T
+	if err := s.codec.Unmarshal(curBytes, &cur); err != nil {
+		return false, err
 	}
 
 	nv, err := fn(cur)
@@ -345,61 +360,50 @@ func (s *sqLiteStore[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool,
 		return false, err
 	}
 	if bytes.Equal(curBytes, newBytes) {
-		// no change
-		if err = tx.Commit(); err != nil {
+		if err := tx.Commit(); err != nil {
 			return false, err
 		}
+		committed = true
 		return false, nil
 	}
 
-	if _, err := tx.Exec(`
-UPDATE zestor_kv
-SET value=?, version=version+1, updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
-WHERE kind=? AND key=?;`, newBytes, kind, key); err != nil {
+	if _, err := tx.ExecContext(ctx, updateQuery, newBytes, kind, key); err != nil {
 		return false, err
 	}
-
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
+	committed = true
 
-	s.publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeUpdate, Object: nv})
-	return false, nil
+	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeUpdate, Object: nv})
+	return true, nil
 }
 
-func (s *sqLiteStore[T]) SetAll(kind string, values map[string]T) error {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return store.ErrClosed
+func (s *sqLiteStore[T]) SetAll(ctx context.Context, kind string, values map[string]T) error {
+	if err := s.guard(ctx); err != nil {
+		return err
 	}
-	s.mu.RUnlock()
 
-	tx, err := s.db.Begin()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rollbackIfNeeded(tx, &err) }()
-
-	// check which keys already exist
-	existingKeys := make(map[string]struct{})
-	rows, err := tx.Query(`SELECT key FROM zestor_kv WHERE kind=?;`, kind)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var k string
-		if err := rows.Scan(&k); err != nil {
-			return err
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
 		}
-		existingKeys[k] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
+	}()
+
+	existingKeys, err := existingKeysTx(ctx, tx, kind)
+	if err != nil {
 		return err
 	}
 
-	stmtIns, err := tx.Prepare(`
+	stmtIns, err := tx.PrepareContext(ctx, `
 INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?)
 ON CONFLICT(kind,key) DO UPDATE SET
   value      = excluded.value,
@@ -417,58 +421,76 @@ ON CONFLICT(kind,key) DO UPDATE SET
 	}
 	defer stmtIns.Close()
 
-	// Track creates vs updates
-	created := make(map[string]T)
-	updated := make(map[string]T)
-	for k, v := range values {
+	// Apply in key order so the event stream is deterministic across runs.
+	evs := make([]*store.Event[T], 0, len(values))
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		v := values[k]
 		enc, err := s.codec.Marshal(v)
 		if err != nil {
 			return err
 		}
-		if _, err := stmtIns.Exec(kind, k, enc); err != nil {
+		if _, err := stmtIns.ExecContext(ctx, kind, k, enc); err != nil {
 			return err
 		}
+		etype := store.EventTypeCreate
 		if _, existed := existingKeys[k]; existed {
-			updated[k] = v
-		} else {
-			created[k] = v
+			etype = store.EventTypeUpdate
 		}
+		evs = append(evs, &store.Event[T]{Kind: kind, Name: k, EventType: etype, Object: v})
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
+	committed = true
 
-	// post-commit notifications with correct event types
-	for k, v := range created {
-		s.publish(kind, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
-	}
-	for k, v := range updated {
-		s.publish(kind, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeUpdate, Object: v})
-	}
+	s.hub.Publish(kind, evs...)
 	return nil
 }
 
-func (s *sqLiteStore[T]) Delete(kind, key string) (bool, T, error) {
-	var zero T
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, zero, store.ErrClosed
+// existingKeysTx reads and fully drains the key set, so the rows are closed
+// before the caller issues further statements on the same transaction.
+func existingKeysTx(ctx context.Context, tx *sql.Tx, kind string) (map[string]struct{}, error) {
+	rows, err := tx.QueryContext(ctx, keysQuery, kind)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
+	defer rows.Close()
 
-	tx, err := s.db.Begin()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
+func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, error) {
+	var zero T
+	if err := s.guard(ctx); err != nil {
+		return false, zero, err
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, zero, err
 	}
-	defer func() { _ = rollbackIfNeeded(tx, &err) }()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 
 	var prevBytes []byte
-	row := tx.QueryRow(`SELECT value FROM zestor_kv WHERE kind=? AND key=?;`, kind, key)
-	if err := row.Scan(&prevBytes); err != nil {
+	if err := tx.QueryRowContext(ctx, getQuery, kind, key).Scan(&prevBytes); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			_ = tx.Rollback()
 			return false, zero, nil
 		}
 		return false, zero, err
@@ -478,28 +500,25 @@ func (s *sqLiteStore[T]) Delete(kind, key string) (bool, T, error) {
 		return false, zero, err
 	}
 
-	if _, err := tx.Exec(`DELETE FROM zestor_kv WHERE kind=? AND key=?;`, kind, key); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM zestor_kv WHERE kind=? AND key=?;`, kind, key); err != nil {
 		return false, zero, err
 	}
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return false, zero, err
 	}
+	committed = true
 
-	s.publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeDelete, Object: prev})
+	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeDelete, Object: prev})
 	return true, prev, nil
 }
 
-func (s *sqLiteStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], func(), error) {
+func (s *sqLiteStore[T]) Watch(ctx context.Context, kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], error) {
 	if kind == "" {
-		return nil, nil, store.ErrKindRequired
+		return nil, store.ErrKindRequired
 	}
-
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, nil, store.ErrClosed
+	if err := s.guard(ctx); err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
 
 	cfg := &store.WatchCfg[T]{}
 	for _, o := range opts {
@@ -508,77 +527,37 @@ func (s *sqLiteStore[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-cha
 		}
 	}
 
-	bufSize := cfg.BufferSize
-	if bufSize <= 0 {
-		bufSize = store.DefaultWatchBufferSize
-	}
+	// Holding writeMu across the snapshot is what guarantees that every replayed
+	// event is queued before any event a concurrent write would publish.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	w := &watcher[T]{
-		ch:         make(chan *store.Event[T], bufSize),
-		eventTypes: cfg.EventTypes,
-	}
-
-	s.muSubs.Lock()
-	if s.subs[kind] == nil {
-		s.subs[kind] = make(map[*watcher[T]]struct{})
-	}
-	s.subs[kind][w] = struct{}{}
-	s.muSubs.Unlock()
-
-	// initial replay (nil eventTypes means all events)
-	sendInitial := cfg.EventTypes == nil
-	if !sendInitial && cfg.EventTypes != nil {
-		_, sendInitial = cfg.EventTypes[store.EventTypeCreate]
-	}
-	if cfg.Initial && sendInitial {
-		go func() {
-			m, err := s.List(kind)
-			if err != nil {
-				// TODO: channel is already returned
-				return
-			}
-			for k, v := range m {
-				select {
-				case w.ch <- &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v}:
-				default:
-					// buffer full, skip
-				}
-			}
-		}()
-	}
-
-	cancel := func() {
-		s.muSubs.Lock()
-		defer s.muSubs.Unlock()
-		if subs, ok := s.subs[kind]; ok {
-			if _, exists := subs[w]; exists {
-				delete(subs, w)
-				if len(subs) == 0 {
-					delete(s.subs, kind)
-				}
-				close(w.ch)
-			}
-		}
-	}
-	return w.ch, cancel, nil
+	return s.hub.Subscribe(ctx, kind, cfg, func() ([]*store.Event[T], error) {
+		return s.snapshot(ctx, kind)
+	})
 }
 
-func (s *sqLiteStore[T]) publish(kind string, ev *store.Event[T]) {
-	s.muSubs.RLock()
-	defer s.muSubs.RUnlock()
-	for w := range s.subs[kind] {
-		// check event type filter (nil means all events)
-		if w.eventTypes != nil {
-			if _, ok := w.eventTypes[ev.EventType]; !ok {
-				continue
-			}
-		}
-		select {
-		case w.ch <- ev:
-		default:
-			// drop if slow consumer
-		}
+func (s *sqLiteStore[T]) snapshot(ctx context.Context, kind string) ([]*store.Event[T], error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM zestor_kv WHERE kind=? ORDER BY key;`, kind)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+
+	var out []*store.Event[T]
+	for rows.Next() {
+		var k string
+		var blob []byte
+		if err := rows.Scan(&k, &blob); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := s.codec.Unmarshal(blob, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
+	}
+	return out, rows.Err()
 }
 
 func (s *sqLiteStore[T]) Close() error {
@@ -590,16 +569,7 @@ func (s *sqLiteStore[T]) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 
-	// close all watchers
-	s.muSubs.Lock()
-	for _, m := range s.subs {
-		for w := range m {
-			close(w.ch)
-		}
-	}
-	s.subs = nil
-	s.muSubs.Unlock()
-
+	s.hub.Close()
 	return s.db.Close()
 }
 
@@ -621,15 +591,12 @@ func (s *sqLiteStore[T]) Dump() string {
 	return sb.String()
 }
 
-func (s *sqLiteStore[T]) GetAll() (map[string]map[string]T, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *sqLiteStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, error) {
+	if err := s.guard(ctx); err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT kind, key, value FROM zestor_kv ORDER BY kind, key;`)
+	rows, err := s.db.QueryContext(ctx, `SELECT kind, key, value FROM zestor_kv ORDER BY kind, key;`)
 	if err != nil {
 		return nil, err
 	}
@@ -652,12 +619,4 @@ func (s *sqLiteStore[T]) GetAll() (map[string]map[string]T, error) {
 		out[kind][key] = v
 	}
 	return out, rows.Err()
-}
-
-// defer helper
-func rollbackIfNeeded(tx *sql.Tx, perr *error) error {
-	if *perr != nil {
-		_ = tx.Rollback()
-	}
-	return nil
 }

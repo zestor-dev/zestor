@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,39 +19,45 @@ type User struct {
 }
 
 func main() {
+	ctx := context.Background()
+
 	// Create a full Store
 	s := gomap.NewMemStore[User](store.StoreOptions[User]{})
 	defer s.Close()
 
 	// Populate some data
-	s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com", Role: "admin"})
-	s.Set("users", "bob", User{Name: "Bob", Email: "bob@example.com", Role: "user"})
-	s.Set("users", "charlie", User{Name: "Charlie", Email: "charlie@example.com", Role: "user"})
+	s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com", Role: "admin"})
+	s.Set(ctx, "users", "bob", User{Name: "Bob", Email: "bob@example.com", Role: "user"})
+	s.Set(ctx, "users", "charlie", User{Name: "Charlie", Email: "charlie@example.com", Role: "user"})
 
 	// Example 1: Pass as Reader (read-only)
 	fmt.Println("=== Reader Example ===")
-	printUserReport(s) // s implements Reader
+	printUserReport(ctx, s) // s implements Reader
 
 	// Example 2: Pass as Writer (write-only)
 	fmt.Println("\n=== Writer Example ===")
-	deactivateUser(s, "users", "charlie") // s implements Writer
+	deactivateUser(ctx, s, "users", "charlie") // s implements Writer
 
 	// Example 3: Pass as Watcher (watch-only)
 	fmt.Println("\n=== Watcher Example ===")
-	go watchForNewUsers(s) // s implements Watcher
+	// The watch lives until this context is cancelled — that is the only way to
+	// unsubscribe.
+	watchCtx, stopWatching := context.WithCancel(ctx)
+	defer stopWatching()
 
-	// Give the watcher time to set up
-	time.Sleep(10 * time.Millisecond)
+	watching := make(chan struct{})
+	go watchForNewUsers(watchCtx, s, watching)
+	<-watching // the watcher is subscribed; events from here on are guaranteed
 
 	// This will trigger the watcher
-	s.Set("users", "diana", User{Name: "Diana", Email: "diana@example.com", Role: "user"})
+	s.Set(ctx, "users", "diana", User{Name: "Diana", Email: "diana@example.com", Role: "user"})
 
 	time.Sleep(100 * time.Millisecond)
 
 	// Example 4: Read-only service
 	fmt.Println("\n=== Service with Reader ===")
 	svc := NewUserQueryService(s)
-	admins := svc.GetAdmins()
+	admins := svc.GetAdmins(ctx)
 	fmt.Printf("Admins: %v\n", admins)
 }
 
@@ -59,11 +66,11 @@ func main() {
 // =============================================================================
 
 // printUserReport only reads data - accepts store.Reader
-func printUserReport(r store.Reader[User]) {
-	count, _ := r.Count("users")
+func printUserReport(ctx context.Context, r store.Reader[User]) {
+	count, _ := r.Count(ctx, "users")
 	fmt.Printf("Total users: %d\n", count)
 
-	users, _ := r.List("users")
+	users, _ := r.List(ctx, "users")
 	for key, user := range users {
 		fmt.Printf("  - %s: %s (%s)\n", key, user.Name, user.Role)
 	}
@@ -76,8 +83,8 @@ func printUserReport(r store.Reader[User]) {
 // =============================================================================
 
 // deactivateUser only writes data - accepts store.Writer
-func deactivateUser(w store.Writer[User], kind, key string) {
-	existed, prev, _ := w.Delete(kind, key)
+func deactivateUser(ctx context.Context, w store.Writer[User], kind, key string) {
+	existed, prev, _ := w.Delete(ctx, kind, key)
 	if existed {
 		fmt.Printf("Deactivated user: %s\n", prev.Name)
 	}
@@ -89,21 +96,26 @@ func deactivateUser(w store.Writer[User], kind, key string) {
 // Example 3: Function that only needs watch access
 // =============================================================================
 
-// watchForNewUsers only watches - accepts store.Watcher
-func watchForNewUsers(w store.Watcher[User]) {
-	ch, cancel, err := w.Watch("users", store.WithEventTypes[User](store.EventTypeCreate))
+// watchForNewUsers only watches - accepts store.Watcher. It closes ready once
+// the subscription exists, so the caller knows subsequent writes will be seen.
+func watchForNewUsers(ctx context.Context, w store.Watcher[User], ready chan<- struct{}) {
+	ch, err := w.Watch(ctx, "users", store.WithEventTypes[User](store.EventTypeCreate))
 	if err != nil {
 		fmt.Println("Watch error:", err)
+		close(ready)
 		return
 	}
-	defer cancel()
+	close(ready)
 
-	// Only process one event for this example
-	select {
-	case ev := <-ch:
+	for ev := range ch {
+		// A watcher that falls behind is told so rather than silently losing
+		// events: the channel closes right after this event.
+		if ev.Err != nil {
+			fmt.Println("Watch ended:", ev.Err, "- re-list and re-watch to resync")
+			return
+		}
 		fmt.Printf("New user created: %s (%s)\n", ev.Name, ev.Object.Name)
-	case <-time.After(1 * time.Second):
-		fmt.Println("No new users")
+		return // only process one event for this example
 	}
 
 	// w.Get(...) ← Would be a compile error! Watcher has no Get method
@@ -125,8 +137,8 @@ func NewUserQueryService(r store.Reader[User]) *UserQueryService {
 }
 
 // GetAdmins returns all admin users
-func (s *UserQueryService) GetAdmins() []User {
-	users, _ := s.reader.List("users", func(key string, u User) bool {
+func (s *UserQueryService) GetAdmins(ctx context.Context) []User {
+	users, _ := s.reader.List(ctx, "users", func(key string, u User) bool {
 		return u.Role == "admin"
 	})
 
@@ -138,8 +150,8 @@ func (s *UserQueryService) GetAdmins() []User {
 }
 
 // GetUserCount returns total user count
-func (s *UserQueryService) GetUserCount() int {
-	count, _ := s.reader.Count("users")
+func (s *UserQueryService) GetUserCount(ctx context.Context) int {
+	count, _ := s.reader.Count(ctx, "users")
 	return count
 }
 
@@ -156,16 +168,16 @@ func NewSyncService(rw store.ReadWriter[User]) *SyncService {
 	return &SyncService{store: rw}
 }
 
-func (s *SyncService) SyncUser(kind, key string, updated User) error {
+func (s *SyncService) SyncUser(ctx context.Context, kind, key string, updated User) error {
 	// Can read
-	existing, ok, err := s.store.Get(kind, key)
+	existing, ok, err := s.store.Get(ctx, kind, key)
 	if err != nil {
 		return err
 	}
 
 	// Can write
 	if !ok || existing.Email != updated.Email {
-		_, err = s.store.Set(kind, key, updated)
+		_, err = s.store.Set(ctx, kind, key, updated)
 	}
 	return err
 }

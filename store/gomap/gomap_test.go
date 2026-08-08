@@ -1,246 +1,121 @@
-package gomap
+package gomap_test
 
 import (
-	"errors"
-	"reflect"
+	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zestor-dev/zestor/store"
+	"github.com/zestor-dev/zestor/store/gomap"
+	"github.com/zestor-dev/zestor/store/storetest"
 )
 
-type testData struct {
-	Name  string
-	Value int
-}
-
-func receiveEvent[T any](t *testing.T, ch <-chan *store.Event[T]) *store.Event[T] {
-	t.Helper()
-	select {
-	case ev, ok := <-ch:
-		if !ok {
-			t.Fatal("watch channel closed unexpectedly")
-		}
-		return ev
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("timed out waiting for watch event")
-		return nil
-	}
-}
-
-func assertNoEvent[T any](t *testing.T, ch <-chan *store.Event[T]) {
-	t.Helper()
-	select {
-	case ev, ok := <-ch:
-		t.Fatalf("received unexpected event %v, ok=%v", ev, ok)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestMemStoreSet(t *testing.T) {
-	tests := []struct {
-		name    string
-		kind    string
-		key     string
-		value   any
-		want    bool
-		wantErr bool
-	}{
-		{
-			name:  "creates string value",
-			kind:  "kind",
-			key:   "k1",
-			value: "v1",
-			want:  true,
+func TestConformance(t *testing.T) {
+	storetest.Run(t, storetest.Config{
+		New: func(t *testing.T) store.Store[storetest.Value] {
+			return gomap.NewMemStore[storetest.Value](store.StoreOptions[storetest.Value]{})
 		},
-		{
-			name:  "creates zero value",
-			kind:  "kind",
-			key:   "k1",
-			value: "",
-			want:  true,
+		NewWithOptions: func(t *testing.T, opts store.StoreOptions[storetest.Value]) store.Store[storetest.Value] {
+			return gomap.NewMemStore[storetest.Value](opts)
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ms := NewMemStore(store.StoreOptions[any]{})
-			created, gotErr := ms.Set(tt.kind, tt.key, tt.value)
-			if gotErr != nil {
-				if !tt.wantErr {
-					t.Errorf("Set() failed: %v", gotErr)
-				}
-				return
-			}
-			if tt.wantErr {
-				t.Fatal("Set() succeeded unexpectedly")
-			}
-			if tt.want != created {
-				t.Errorf("Set() = %v, want %v", created, tt.want)
-			}
-			got, ok, err := ms.Get(tt.kind, tt.key)
-			if !ok {
-				t.Fatal("Get() returned ok=false")
-			}
-			if got != tt.value {
-				t.Errorf("Get() = %v, want %v", got, tt.value)
-			}
-			if err != nil {
-				t.Errorf("Get() failed: %v", err)
-			}
-		})
-	}
-}
-
-func TestMemStoreSetSuppressesNoopUpdateEvent(t *testing.T) {
-	ms := NewMemStore(store.StoreOptions[testData]{})
-
-	ch, cancel, err := ms.Watch("kind", store.WithEventTypes[testData](store.EventTypeUpdate))
-	if err != nil {
-		t.Fatalf("Watch() error = %v", err)
-	}
-	defer cancel()
-
-	value := testData{Name: "same", Value: 1}
-	if created, err := ms.Set("kind", "key", value); err != nil || !created {
-		t.Fatalf("Set() created = %v, error = %v", created, err)
-	}
-	if created, err := ms.Set("kind", "key", value); err != nil || created {
-		t.Fatalf("Set() created = %v, error = %v", created, err)
-	}
-
-	assertNoEvent(t, ch)
-}
-
-func TestMemStoreWatchAllowsNilOptions(t *testing.T) {
-	ms := NewMemStore(store.StoreOptions[testData]{})
-
-	ch, cancel, err := ms.Watch("kind", nil)
-	if err != nil {
-		t.Fatalf("Watch() error = %v", err)
-	}
-	defer cancel()
-
-	if _, err := ms.Set("kind", "key", testData{Name: "created"}); err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
-	ev := receiveEvent(t, ch)
-	if ev.EventType != store.EventTypeCreate || ev.Name != "key" {
-		t.Fatalf("event = %#v, want create for key", ev)
-	}
-}
-
-func TestMemStoreSetFnValidatesAndSuppressesNoop(t *testing.T) {
-	validateErr := errors.New("value must be non-negative")
-	ms := NewMemStore(store.StoreOptions[testData]{
-		ValidateFns: map[string]store.ValidateFunc[testData]{
-			"kind": func(v testData) error {
-				if v.Value < 0 {
-					return validateErr
-				}
-				return nil
-			},
-		},
+		// In-memory: events are queued synchronously with the write.
+		EventDelay:  time.Second,
+		SettleDelay: 100 * time.Millisecond,
 	})
-
-	if _, err := ms.Set("kind", "key", testData{Name: "valid", Value: 1}); err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
-
-	if _, err := ms.SetFn("kind", "key", func(v testData) (testData, error) {
-		v.Value = -1
-		return v, nil
-	}); !errors.Is(err, validateErr) {
-		t.Fatalf("SetFn() error = %v, want %v", err, validateErr)
-	}
-
-	got, ok, err := ms.Get("kind", "key")
-	if err != nil || !ok {
-		t.Fatalf("Get() error = %v, ok = %v", err, ok)
-	}
-	if got.Value != 1 {
-		t.Fatalf("Get() value = %d, want original value 1", got.Value)
-	}
-
-	ch, cancel, err := ms.Watch("kind", store.WithEventTypes[testData](store.EventTypeUpdate))
-	if err != nil {
-		t.Fatalf("Watch() error = %v", err)
-	}
-	defer cancel()
-
-	if changed, err := ms.SetFn("kind", "key", func(v testData) (testData, error) {
-		return v, nil
-	}); err != nil || changed {
-		t.Fatalf("SetFn() changed = %v, error = %v", changed, err)
-	}
-	assertNoEvent(t, ch)
 }
 
-func TestMemStoreSetAllSuppressesNoopUpdateEvent(t *testing.T) {
-	ms := NewMemStore(store.StoreOptions[testData]{})
-	if _, err := ms.Set("kind", "same", testData{Name: "same", Value: 1}); err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
+// --- gomap-specific behaviour ------------------------------------------------
 
-	ch, cancel, err := ms.Watch("kind")
-	if err != nil {
-		t.Fatalf("Watch() error = %v", err)
-	}
-	defer cancel()
-
-	if err := ms.SetAll("kind", map[string]testData{
-		"same": {Name: "same", Value: 1},
-		"new":  {Name: "new", Value: 2},
-	}); err != nil {
-		t.Fatalf("SetAll() error = %v", err)
-	}
-
-	ev := receiveEvent(t, ch)
-	if ev.EventType != store.EventTypeCreate || ev.Name != "new" {
-		t.Fatalf("event = %#v, want one create event for new key", ev)
-	}
-	assertNoEvent(t, ch)
+type item struct {
+	Name string
+	Tags []string
 }
 
-func TestMemStoreGetAllReturnsClone(t *testing.T) {
-	ms := NewMemStore(store.StoreOptions[testData]{})
-	value := testData{Name: "stored", Value: 1}
-	if _, err := ms.Set("kind", "key", value); err != nil {
-		t.Fatalf("Set() error = %v", err)
+func newStore(t *testing.T) store.Store[item] {
+	t.Helper()
+	s := gomap.NewMemStore[item](store.StoreOptions[item]{})
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// GetAll copies the kind and key maps, so mutating the result cannot reach the
+// store. (The values themselves are copied shallowly — see the method doc.)
+func TestGetAllCopiesMaps(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if _, err := s.Set(ctx, "k", "a", item{Name: "a"}); err != nil {
+		t.Fatal(err)
 	}
 
-	all, err := ms.GetAll()
+	all, err := s.GetAll(ctx)
 	if err != nil {
-		t.Fatalf("GetAll() error = %v", err)
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(all, map[string]map[string]testData{"kind": {"key": value}}) {
-		t.Fatalf("GetAll() = %#v", all)
-	}
+	all["k"]["b"] = item{Name: "injected"}
+	delete(all, "k")
 
-	all["kind"]["key"] = testData{Name: "mutated", Value: 99}
-	got, ok, err := ms.Get("kind", "key")
-	if err != nil || !ok {
-		t.Fatalf("Get() error = %v, ok = %v", err, ok)
+	if _, ok, _ := s.Get(ctx, "k", "b"); ok {
+		t.Error("writing to the map returned by GetAll reached the store")
 	}
-	if got != value {
-		t.Fatalf("Get() = %#v, want %#v", got, value)
+	if n, _ := s.Count(ctx, "k"); n != 1 {
+		t.Errorf("Count=%d after mutating GetAll's result, want 1", n)
 	}
 }
 
-func TestMemStoreCloseClosesWatchersAndRejectsOperations(t *testing.T) {
-	ms := NewMemStore(store.StoreOptions[testData]{})
-	ch, cancel, err := ms.Watch("kind")
-	if err != nil {
-		t.Fatalf("Watch() error = %v", err)
-	}
+// Watch tolerates nil options, which a caller building an option slice
+// dynamically can easily produce.
+func TestWatchIgnoresNilOptions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	s := newStore(t)
 
-	if err := ms.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	ch, err := s.Watch(ctx, "k", nil, store.WithBufferSize[item](8), nil)
+	if err != nil {
+		t.Fatalf("Watch with nil options: %v", err)
 	}
-	if _, ok := <-ch; ok {
-		t.Fatal("watch channel remained open after Close()")
+	if _, err := s.Set(ctx, "k", "a", item{Name: "a"}); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := ms.Set("kind", "key", testData{}); !errors.Is(err, store.ErrClosed) {
-		t.Fatalf("Set() error = %v, want %v", err, store.ErrClosed)
+	if ev := <-ch; ev.Name != "a" {
+		t.Errorf("got event for %q, want a", ev.Name)
+	}
+}
+
+// Delete and SetFn on a kind that was never written must not bring it into
+// existence (FIX-PLAN T0.4).
+func TestMissingKindIsNotMaterialized(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	for _, kind := range []string{"never-1", "never-2", "never-3"} {
+		if _, _, err := s.Delete(ctx, kind, "k"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.SetFn(ctx, kind, "k", func(v item) (item, error) { return v, nil }); err != store.ErrKeyNotFound {
+			t.Fatalf("SetFn on a missing kind returned %v, want ErrKeyNotFound", err)
+		}
+	}
+
+	all, err := s.GetAll(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("GetAll reports %d kinds after only reads and misses, want 0: %v", len(all), all)
+	}
+}
+
+func TestDumpIsSorted(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	for _, k := range []string{"c", "a", "b"} {
+		if _, err := s.Set(ctx, "kind", k, item{Name: k}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := s.Dump()
+	if want := "kind:\n  a: "; !strings.HasPrefix(got, want) {
+		t.Errorf("Dump() = %q, want it to start with %q", got, want)
 	}
 }

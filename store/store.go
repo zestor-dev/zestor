@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"reflect"
 )
@@ -9,29 +10,64 @@ var (
 	ErrClosed       = errors.New("store closed")
 	ErrKeyNotFound  = errors.New("key not found")
 	ErrKindRequired = errors.New("kind required")
+
+	// ErrWatchOverflow terminates a watch whose consumer fell too far behind.
+	// It is delivered as the Err field of a final EventTypeError event, after
+	// which the channel is closed. The consumer's view of the store is
+	// incomplete at that point and must be rebuilt by re-listing and
+	// re-watching. See the Watcher contract below.
+	ErrWatchOverflow = errors.New("watch overflow: consumer fell behind, re-list required")
 )
 
 // Reader provides read-only access to the store.
 type Reader[T any] interface {
-	Get(kind, key string) (val T, ok bool, err error)
-	List(kind string, filter ...FilterFunc[T]) (map[string]T, error)
-	Count(kind string) (int, error)
-	Keys(kind string) ([]string, error)
-	Values(kind string) ([]KeyValue[T], error)
-	GetAll() (map[string]map[string]T, error)
+	Get(ctx context.Context, kind, key string) (val T, ok bool, err error)
+	List(ctx context.Context, kind string, filter ...FilterFunc[T]) (map[string]T, error)
+	Count(ctx context.Context, kind string) (int, error)
+	Keys(ctx context.Context, kind string) ([]string, error)
+	Values(ctx context.Context, kind string) ([]KeyValue[T], error)
+	GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
 
 // Writer provides write access to the store.
 type Writer[T any] interface {
-	Set(kind, key string, value T) (created bool, err error)
-	SetFn(kind, key string, fn func(v T) (T, error)) (changed bool, err error)
-	SetAll(kind string, values map[string]T) error
-	Delete(kind, key string) (existed bool, prev T, err error)
+	Set(ctx context.Context, kind, key string, value T) (created bool, err error)
+	// SetFn atomically applies fn to the value stored at kind/key. It reports
+	// whether the stored value actually changed: false means either fn returned
+	// a value equal to the previous one, or an error occurred.
+	//
+	// fn runs while the store's write lock is held. It must not call back into
+	// the store; doing so deadlocks.
+	SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (changed bool, err error)
+	SetAll(ctx context.Context, kind string, values map[string]T) error
+	Delete(ctx context.Context, kind, key string) (existed bool, prev T, err error)
 }
 
 // Watcher provides the ability to watch for changes.
+//
+// Every implementation guarantees:
+//
+//  1. Ordering — events for a given kind are delivered in the order the writes
+//     were applied. A consumer that applies events in receive order converges on
+//     the same state the store holds.
+//
+//  2. Replay precedes live — with WithInitialReplay, every replayed event is
+//     delivered before every event for a write that happened after the call to
+//     Watch. The snapshot is taken atomically with the subscription.
+//
+//  3. No silent gaps — if the consumer falls roughly BufferSize events behind,
+//     the watch is terminated rather than degraded: a final event with
+//     EventType EventTypeError and Err ErrWatchOverflow is delivered, then the
+//     channel is closed. Event type filters never suppress this event.
+//
+//  4. Exactly-once close — the channel is closed exactly once, when ctx is
+//     cancelled, when the watch overflows, or when the store is closed. The
+//     consumer can therefore range over it safely.
+//
+// The watch lives until ctx is cancelled; cancelling ctx is the only way for a
+// caller to unsubscribe.
 type Watcher[T any] interface {
-	Watch(kind string, opts ...WatchOption[T]) (r <-chan *Event[T], cancel func(), err error)
+	Watch(ctx context.Context, kind string, opts ...WatchOption[T]) (<-chan *Event[T], error)
 }
 
 // ReadWriter combines Reader and Writer interfaces.
@@ -60,7 +96,9 @@ type Event[T any] struct {
 	Kind      string
 	Name      string
 	EventType EventType
-	Object    T // for delete: previous value
+	Object    T // for delete: previous value; for EventTypeError: the zero value
+	// Err is set only on EventTypeError, the terminal event of a watch.
+	Err error
 }
 
 type EventType string
@@ -69,12 +107,18 @@ const (
 	EventTypeCreate EventType = "create"
 	EventTypeUpdate EventType = "update"
 	EventTypeDelete EventType = "delete"
+	// EventTypeError is the terminal event of a watch. It carries the reason in
+	// Event.Err and is followed by the channel closing. It is never filtered out
+	// by WithEventTypes, because a consumer that filtered it away could not
+	// learn that its view had become incomplete.
+	EventTypeError EventType = "error"
 )
 
 // Watch options
 type WatchOption[T any] func(*WatchCfg[T])
 
-// DefaultWatchBufferSize is the default channel buffer size for watchers.
+// DefaultWatchBufferSize is the default number of events a watcher may fall
+// behind before the watch overflows.
 const DefaultWatchBufferSize = 128
 
 type WatchCfg[T any] struct {
@@ -82,7 +126,8 @@ type WatchCfg[T any] struct {
 	Initial bool
 	// only send events of the specified types
 	EventTypes map[EventType]struct{}
-	// channel buffer size (0 means use default)
+	// how far the consumer may fall behind before ErrWatchOverflow
+	// (0 means use DefaultWatchBufferSize)
 	BufferSize int
 }
 

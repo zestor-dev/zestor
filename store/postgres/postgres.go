@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/zestor-dev/zestor/codec"
 	"github.com/zestor-dev/zestor/store"
+	"github.com/zestor-dev/zestor/store/internal/watchhub"
 )
 
 const (
@@ -28,13 +31,8 @@ type Options struct {
 	Codec codec.Codec
 	// Optional namespace/tenant id. Defaults to 0.
 	Namespace int64
-	// Timeout for the db operations
+	// Upper bound applied to each operation, on top of the caller's context.
 	Timeout time.Duration
-}
-
-type watcher[T any] struct {
-	ch         chan *store.Event[T]
-	eventTypes map[store.EventType]struct{}
 }
 
 type storePG[T any] struct {
@@ -43,8 +41,10 @@ type storePG[T any] struct {
 	ns      int64
 	timeout time.Duration
 
-	muSubs sync.RWMutex
-	subs   map[string]map[*watcher[T]]struct{}
+	// hub is fed by the drain loop, which reads the outbox in id order.
+	// Publication therefore needs no extra write lock here; the hub lock alone
+	// makes a Watch snapshot atomic with respect to publication.
+	hub *watchhub.Hub[T]
 
 	mu     sync.RWMutex
 	closed bool
@@ -59,7 +59,7 @@ type storePG[T any] struct {
 }
 
 // New opens a pool, ensures schema, starts the LISTEN loop, and returns a Store[T].
-func New[T any](o Options) (store.Store[T], error) {
+func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	if o.ConnString == "" {
 		return nil, errors.New("postgres: ConnString required")
 	}
@@ -74,24 +74,26 @@ func New[T any](o Options) (store.Store[T], error) {
 	if o.Timeout == 0 {
 		o.Timeout = defaultTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), o.Timeout)
-	defer cancel()
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	dialCtx, cancelDial := context.WithTimeout(ctx, o.Timeout)
+	defer cancelDial()
+	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	listCtx, listenCancel := context.WithCancel(context.Background())
+	// The listen loop outlives the constructor's context on purpose: it is torn
+	// down by Close, not by whatever context happened to open the store.
+	listenCtx, listenCancel := context.WithCancel(context.Background())
 	s := &storePG[T]{
 		pool:         pool,
 		codec:        o.Codec,
 		ns:           o.Namespace,
 		timeout:      o.Timeout,
-		subs:         make(map[string]map[*watcher[T]]struct{}),
+		hub:          watchhub.New[T](),
 		listenCancel: listenCancel,
 		listenReady:  make(chan struct{}),
 	}
-	if err := s.ensureSchema(context.Background()); err != nil {
+	if err := s.ensureSchema(ctx); err != nil {
 		listenCancel()
 		pool.Close()
 		return nil, err
@@ -100,10 +102,10 @@ func New[T any](o Options) (store.Store[T], error) {
 	s.listenWG.Add(1)
 	go func() {
 		defer s.listenWG.Done()
-		s.listenLoop(listCtx)
+		s.listenLoop(listenCtx)
 	}()
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), o.Timeout)
+	waitCtx, waitCancel := context.WithTimeout(ctx, o.Timeout)
 	defer waitCancel()
 	select {
 	case <-s.listenReady:
@@ -115,6 +117,23 @@ func New[T any](o Options) (store.Store[T], error) {
 	}
 
 	return s, nil
+}
+
+// guard rejects operations on a closed store, honours an already-cancelled
+// context, and applies Options.Timeout as an upper bound on top of the caller's
+// deadline.
+func (s *storePG[T]) guard(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	s.mu.RLock()
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed {
+		return nil, nil, store.ErrClosed
+	}
+	opCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	return opCtx, cancel, nil
 }
 
 func (s *storePG[T]) ensureSchema(ctx context.Context) error {
@@ -174,19 +193,16 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 	return tx.Commit(ctx)
 }
 
-func (s *storePG[T]) Get(kind, key string) (T, bool, error) {
+func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error) {
 	var zero T
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return zero, false, store.ErrClosed
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return zero, false, err
 	}
-	s.mu.RUnlock()
+	defer cancel()
 
 	var b []byte
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`SELECT value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 AND key=$3`,
 		s.ns, kind, key).Scan(&b)
 	if err != nil {
@@ -202,16 +218,13 @@ func (s *storePG[T]) Get(kind, key string) (T, bool, error) {
 	return v, true, nil
 }
 
-func (s *storePG[T]) List(kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *storePG[T]) List(ctx context.Context, kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT key, value FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
 	if err != nil {
@@ -219,7 +232,7 @@ func (s *storePG[T]) List(kind string, filter ...store.FilterFunc[T]) (map[strin
 	}
 	defer rows.Close()
 
-	out := make(map[string]T, 64)
+	out := make(map[string]T)
 	for rows.Next() {
 		var k string
 		var b []byte
@@ -244,32 +257,26 @@ func (s *storePG[T]) List(kind string, filter ...store.FilterFunc[T]) (map[strin
 	return out, rows.Err()
 }
 
-func (s *storePG[T]) Count(kind string) (int, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return 0, store.ErrClosed
+func (s *storePG[T]) Count(ctx context.Context, kind string) (int, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return 0, err
 	}
-	s.mu.RUnlock()
+	defer cancel()
 
 	var n int
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind).Scan(&n)
 	return n, err
 }
 
-func (s *storePG[T]) Keys(kind string) ([]string, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *storePG[T]) Keys(ctx context.Context, kind string) ([]string, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT key FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
 	if err != nil {
@@ -277,7 +284,7 @@ func (s *storePG[T]) Keys(kind string) ([]string, error) {
 	}
 	defer rows.Close()
 
-	keys := make([]string, 0, 64)
+	keys := make([]string, 0)
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
@@ -288,16 +295,13 @@ func (s *storePG[T]) Keys(kind string) ([]string, error) {
 	return keys, rows.Err()
 }
 
-func (s *storePG[T]) Values(kind string) ([]store.KeyValue[T], error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *storePG[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[T], error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT key, value FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
 	if err != nil {
@@ -305,7 +309,7 @@ func (s *storePG[T]) Values(kind string) ([]store.KeyValue[T], error) {
 	}
 	defer rows.Close()
 
-	out := make([]store.KeyValue[T], 0, 64)
+	out := make([]store.KeyValue[T], 0)
 	for rows.Next() {
 		var k string
 		var b []byte
@@ -321,16 +325,13 @@ func (s *storePG[T]) Values(kind string) ([]store.KeyValue[T], error) {
 	return out, rows.Err()
 }
 
-func (s *storePG[T]) GetAll() (map[string]map[string]T, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, store.ErrClosed
+func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT kind, key, value FROM zestor_kv WHERE ns_id=$1 ORDER BY kind, key`, s.ns)
 	if err != nil {
@@ -357,20 +358,17 @@ func (s *storePG[T]) GetAll() (map[string]map[string]T, error) {
 	return out, rows.Err()
 }
 
-func (s *storePG[T]) Set(kind, key string, value T) (bool, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, store.ErrClosed
+func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (bool, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return false, err
 	}
-	s.mu.RUnlock()
+	defer cancel()
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
 		return false, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
-	defer cancel()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -415,9 +413,7 @@ func (s *storePG[T]) Set(kind, key string, value T) (bool, error) {
 	if created {
 		etype = store.EventTypeCreate
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO zestor_outbox(ns_id,kind,key,etype,value) VALUES($1,$2,$3,$4,$5)`,
-		s.ns, kind, key, string(etype), enc); err != nil {
+	if err := s.appendOutbox(ctx, tx, kind, key, etype, enc); err != nil {
 		return false, err
 	}
 
@@ -428,16 +424,13 @@ func (s *storePG[T]) Set(kind, key string, value T) (bool, error) {
 	return created, nil
 }
 
-func (s *storePG[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, error) {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, store.ErrClosed
+func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return false, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -481,53 +474,38 @@ func (s *storePG[T]) SetFn(kind, key string, fn func(v T) (T, error)) (bool, err
 		return false, err
 	}
 
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO zestor_outbox(ns_id,kind,key,etype,value) VALUES($1,$2,$3,$4,$5)`,
-		s.ns, kind, key, string(store.EventTypeUpdate), newBytes); err != nil {
+	if err := s.appendOutbox(ctx, tx, kind, key, store.EventTypeUpdate, newBytes); err != nil {
 		return false, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
-	return false, nil
+	return true, nil
 }
 
-func (s *storePG[T]) SetAll(kind string, values map[string]T) error {
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return store.ErrClosed
+func (s *storePG[T]) SetAll(ctx context.Context, kind string, values map[string]T) error {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	existingKeys := make(map[string]struct{})
-	keyRows, err := tx.Query(ctx, `SELECT key FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
+	existingKeys, err := s.existingKeys(ctx, tx, kind)
 	if err != nil {
 		return err
 	}
-	defer keyRows.Close()
-	for keyRows.Next() {
-		var k string
-		if err := keyRows.Scan(&k); err != nil {
-			return err
-		}
-		existingKeys[k] = struct{}{}
-	}
-	if err := keyRows.Err(); err != nil {
-		return err
-	}
 
-	for k, v := range values {
-		b, err := s.codec.Marshal(v)
+	// Apply in key order so the outbox — and therefore the event stream — is
+	// deterministic across runs.
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		b, err := s.codec.Marshal(values[k])
 		if err != nil {
 			return err
 		}
@@ -543,37 +521,26 @@ func (s *storePG[T]) SetAll(kind string, values map[string]T) error {
 			s.ns, kind, k, b); err != nil {
 			return err
 		}
-		var etype store.EventType
+		etype := store.EventTypeCreate
 		if _, existed := existingKeys[k]; existed {
 			etype = store.EventTypeUpdate
-		} else {
-			etype = store.EventTypeCreate
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO zestor_outbox(ns_id,kind,key,etype,value) VALUES($1,$2,$3,$4,$5)`,
-			s.ns, kind, k, string(etype), b); err != nil {
+		if err := s.appendOutbox(ctx, tx, kind, k, etype, b); err != nil {
 			return err
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return tx.Commit(ctx)
 }
 
-func (s *storePG[T]) Delete(kind, key string) (bool, T, error) {
+func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, error) {
 	var zero T
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return false, zero, store.ErrClosed
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return false, zero, err
 	}
-	s.mu.RUnlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, zero, err
@@ -600,9 +567,7 @@ func (s *storePG[T]) Delete(kind, key string) (bool, T, error) {
 		s.ns, kind, key); err != nil {
 		return false, zero, err
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO zestor_outbox(ns_id,kind,key,etype,value) VALUES($1,$2,$3,'delete',$4)`,
-		s.ns, kind, key, prevBytes); err != nil {
+	if err := s.appendOutbox(ctx, tx, kind, key, store.EventTypeDelete, prevBytes); err != nil {
 		return false, zero, err
 	}
 
@@ -612,17 +577,40 @@ func (s *storePG[T]) Delete(kind, key string) (bool, T, error) {
 	return true, prev, nil
 }
 
-func (s *storePG[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], func(), error) {
-	if kind == "" {
-		return nil, nil, store.ErrKindRequired
-	}
+func (s *storePG[T]) appendOutbox(ctx context.Context, tx pgx.Tx, kind, key string, etype store.EventType, value []byte) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO zestor_outbox(ns_id,kind,key,etype,value) VALUES($1,$2,$3,$4,$5)`,
+		s.ns, kind, key, string(etype), value)
+	return err
+}
 
-	s.mu.RLock()
-	if s.closed {
-		s.mu.RUnlock()
-		return nil, nil, store.ErrClosed
+func (s *storePG[T]) existingKeys(ctx context.Context, tx pgx.Tx, kind string) (map[string]struct{}, error) {
+	rows, err := tx.Query(ctx, `SELECT key FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RUnlock()
+	defer rows.Close()
+
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out[k] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
+func (s *storePG[T]) Watch(ctx context.Context, kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], error) {
+	if kind == "" {
+		return nil, store.ErrKindRequired
+	}
+	opCtx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
 
 	cfg := &store.WatchCfg[T]{}
 	for _, o := range opts {
@@ -631,67 +619,37 @@ func (s *storePG[T]) Watch(kind string, opts ...store.WatchOption[T]) (<-chan *s
 		}
 	}
 
-	bufSize := cfg.BufferSize
-	if bufSize <= 0 {
-		bufSize = store.DefaultWatchBufferSize
-	}
+	// The snapshot runs while the hub lock is held, which locks out the drain
+	// loop: nothing it publishes can slip between the snapshot and the
+	// subscription. Note that the watch itself is bound to ctx, not opCtx —
+	// Options.Timeout bounds the snapshot query, not the lifetime of the watch.
+	return s.hub.Subscribe(ctx, kind, cfg, func() ([]*store.Event[T], error) {
+		return s.snapshot(opCtx, kind)
+	})
+}
 
-	w := &watcher[T]{
-		ch:         make(chan *store.Event[T], bufSize),
-		eventTypes: cfg.EventTypes,
+func (s *storePG[T]) snapshot(ctx context.Context, kind string) ([]*store.Event[T], error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT key, value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 ORDER BY key`, s.ns, kind)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
 
-	s.muSubs.Lock()
-	if s.subs[kind] == nil {
-		s.subs[kind] = make(map[*watcher[T]]struct{})
-	}
-	s.subs[kind][w] = struct{}{}
-	s.muSubs.Unlock()
-
-	sendInitial := cfg.EventTypes == nil
-	if !sendInitial && cfg.EventTypes != nil {
-		_, sendInitial = cfg.EventTypes[store.EventTypeCreate]
-	}
-	if cfg.Initial && sendInitial {
-		go func() {
-			m, err := s.List(kind)
-			if err != nil {
-				return
-			}
-			for k, v := range m {
-				ev := &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v}
-				s.muSubs.Lock()
-				if s.subs[kind] == nil {
-					s.muSubs.Unlock()
-					return
-				}
-				if _, subscribed := s.subs[kind][w]; !subscribed {
-					s.muSubs.Unlock()
-					return
-				}
-				select {
-				case w.ch <- ev:
-				default:
-				}
-				s.muSubs.Unlock()
-			}
-		}()
-	}
-
-	cancel := func() {
-		s.muSubs.Lock()
-		defer s.muSubs.Unlock()
-		if subs, ok := s.subs[kind]; ok {
-			if _, exists := subs[w]; exists {
-				delete(subs, w)
-				if len(subs) == 0 {
-					delete(s.subs, kind)
-				}
-				close(w.ch)
-			}
+	var out []*store.Event[T]
+	for rows.Next() {
+		var k string
+		var b []byte
+		if err := rows.Scan(&k, &b); err != nil {
+			return nil, err
 		}
+		var v T
+		if err := s.codec.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
 	}
-	return w.ch, cancel, nil
+	return out, rows.Err()
 }
 
 type drainState struct {
@@ -763,10 +721,16 @@ SELECT id, key, etype, value
 					continue
 				}
 
-				var done bool
-				var iterErr error
+				// Collect the whole batch before publishing, so the pooled
+				// connection is released before we contend for the hub lock. A
+				// Watch snapshot holds that lock while querying, so publishing
+				// with a connection still checked out could deadlock the pool.
+				var (
+					evs     []*store.Event[T]
+					highest = cursor
+					iterErr error
+				)
 				for rows.Next() {
-					done = true
 					var id int64
 					var name, etype string
 					var val []byte
@@ -775,20 +739,19 @@ SELECT id, key, etype, value
 						break
 					}
 					var obj T
-					_ = s.codec.Unmarshal(val, &obj)
-
-					s.publish(k, &store.Event[T]{
+					if err := s.codec.Unmarshal(val, &obj); err != nil {
+						iterErr = fmt.Errorf("outbox row %d (%s/%s): %w", id, k, name, err)
+						break
+					}
+					evs = append(evs, &store.Event[T]{
 						Kind:      k,
 						Name:      name,
 						EventType: store.EventType(etype),
 						Object:    obj,
 					})
-
-					mu.Lock()
-					if id > lastID[k] {
-						lastID[k] = id
+					if id > highest {
+						highest = id
 					}
-					mu.Unlock()
 				}
 				if iterErr == nil {
 					iterErr = rows.Err()
@@ -808,9 +771,16 @@ SELECT id, key, etype, value
 					continue
 				}
 
-				if !done {
+				if len(evs) == 0 {
 					return
 				}
+
+				s.hub.Publish(k, evs...)
+				mu.Lock()
+				if highest > lastID[k] {
+					lastID[k] = highest
+				}
+				mu.Unlock()
 			}
 		}(kind)
 	}
@@ -830,7 +800,7 @@ SELECT id, key, etype, value
 				return
 			}
 			time.Sleep(backoff)
-			backoff = minDur(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 		backoff = 200 * time.Millisecond
@@ -842,7 +812,7 @@ SELECT id, key, etype, value
 				return
 			}
 			time.Sleep(backoff)
-			backoff = minDur(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 		if _, err := conn.Exec(ctx, `LISTEN zestor_events`); err != nil {
@@ -851,7 +821,7 @@ SELECT id, key, etype, value
 				return
 			}
 			time.Sleep(backoff)
-			backoff = minDur(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 		s.signalListenReady()
@@ -899,7 +869,7 @@ SELECT id, key, etype, value
 		}
 		if reacquire {
 			time.Sleep(backoff)
-			backoff = minDur(backoff*2, 5*time.Second)
+			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
 	}
@@ -921,29 +891,6 @@ func parsePayload(p string) (ns int64, kind, key, etype string, id int64, err er
 	return
 }
 
-func minDur(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func (s *storePG[T]) publish(kind string, ev *store.Event[T]) {
-	s.muSubs.RLock()
-	defer s.muSubs.RUnlock()
-	for w := range s.subs[kind] {
-		if w.eventTypes != nil {
-			if _, ok := w.eventTypes[ev.EventType]; !ok {
-				continue
-			}
-		}
-		select {
-		case w.ch <- ev:
-		default:
-		}
-	}
-}
-
 func (s *storePG[T]) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -953,29 +900,25 @@ func (s *storePG[T]) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 
-	s.muSubs.Lock()
-	for _, m := range s.subs {
-		for w := range m {
-			close(w.ch)
-		}
-	}
-	s.subs = nil
-	s.muSubs.Unlock()
-
+	// Stop the drain before closing the hub, so no goroutine is mid-publish when
+	// subscribers are torn down.
 	if s.listenCancel != nil {
 		s.listenCancel()
 	}
 	s.listenWG.Wait()
+	s.hub.Close()
 	s.pool.Close()
 	return nil
 }
 
 func (s *storePG[T]) Dump() string {
 	var sb strings.Builder
-	rows, err := s.pool.Query(context.Background(),
-		`SELECT kind, key, OCTET_LENGTH(value), version, updated_at 
-           FROM zestor_kv 
-          WHERE ns_id=$1 
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx,
+		`SELECT kind, key, OCTET_LENGTH(value), version, updated_at
+           FROM zestor_kv
+          WHERE ns_id=$1
        ORDER BY kind, key`, s.ns)
 	if err != nil {
 		return err.Error()

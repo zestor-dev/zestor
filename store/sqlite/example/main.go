@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -17,7 +18,9 @@ type Note struct {
 }
 
 func main() {
-	s, err := sqlite.New[Note](sqlite.Options{
+	ctx := context.Background()
+
+	s, err := sqlite.New[Note](ctx, sqlite.Options{
 		DSN:         "file:notes.db?cache=shared",
 		Codec:       &codec.JSON{},
 		BusyTimeout: 5 * time.Second,
@@ -27,33 +30,54 @@ func main() {
 	}
 	defer s.Close()
 
-	// watch for changes
-	fmt.Println("- Watching for changes...")
-	ch, cancel, _ := s.Watch("notes", store.WithInitialReplay[Note]())
-	defer cancel()
+	// Watch until watchCtx is cancelled. WithInitialReplay delivers what is
+	// already stored before anything written afterwards, so the loop below sees
+	// a consistent picture without a separate List.
+	watchCtx, stopWatching := context.WithCancel(ctx)
+	defer stopWatching()
 
+	fmt.Println("- Watching for changes...")
+	ch, err := s.Watch(watchCtx, "notes", store.WithInitialReplay[Note]())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for ev := range ch {
+			if ev.Err != nil {
+				// The consumer fell behind: this view is incomplete and must be
+				// rebuilt with a fresh List plus a new Watch.
+				log.Printf("watch ended: %v", ev.Err)
+				return
+			}
 			fmt.Printf("[%s] %s: %+v\n", ev.EventType, ev.Object.Title, ev.Object)
 		}
 	}()
-	time.Sleep(5000 * time.Millisecond)
+
 	fmt.Println("- Setting notes...")
-	// create notes
-	s.Set("notes", "note-1", Note{
+	if _, err := s.Set(ctx, "notes", "note-1", Note{
 		Title:   "Meeting Notes",
 		Content: "Discussed Q4 planning...",
 		Updated: time.Now(),
-	})
-
-	s.Set("notes", "note-2", Note{
+	}); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := s.Set(ctx, "notes", "note-2", Note{
 		Title:   "Ideas",
 		Content: "New feature brainstorm...",
 		Updated: time.Now(),
-	})
-	time.Sleep(time.Second)
-	// list all notes
-	notes, _ := s.List("notes")
+	}); err != nil {
+		log.Fatal(err)
+	}
+
+	notes, err := s.List(ctx, "notes")
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Printf("\nTotal notes: %d\n", len(notes))
-	<-time.After(time.Second)
+
+	stopWatching()
+	<-done
 }
