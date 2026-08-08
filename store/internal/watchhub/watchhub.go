@@ -42,36 +42,25 @@ func New[T any]() *Hub[T] {
 	return &Hub[T]{subs: make(map[string]map[*sub[T]]struct{})}
 }
 
-// EmitFunc queues events for the subscribers that already exist. It is only
-// valid inside a Hooks callback, where the hub lock is already held.
-type EmitFunc[T any] func(kind string, evs ...*store.Event[T])
-
 // Hooks are backend callbacks that run while publishers are locked out, so that
 // everything they do is ordered ahead of the new subscription.
+//
+// A backend whose publication lags its writes must additionally ensure, by its
+// own means, that nothing is mid-publish when it calls Subscribe. The hub can
+// order a subscription against publishers that have not started, but not
+// against a batch a publisher is already holding. See the drain lock in
+// store/postgres.
 type Hooks[T any] struct {
-	// CatchUp flushes events that are already committed but not yet published,
-	// delivering them to the subscribers that already exist. Backends whose
-	// publication lags their writes — postgres, which publishes from an
-	// asynchronous outbox drain — must supply this. Without it a new subscriber
-	// receives events for writes that happened before it subscribed, because
-	// those events are still in flight when it registers.
-	//
-	// Backends that publish synchronously with the write (gomap, sqlite) have
-	// nothing in flight and leave this nil.
-	CatchUp func(emit EmitFunc[T]) error
-
 	// Snapshot returns the events that make up the initial replay. It is called
-	// after CatchUp, and only when the watcher asked for a replay and accepts
-	// create events.
+	// only when the watcher asked for a replay and accepts create events.
 	Snapshot func() ([]*store.Event[T], error)
 }
 
 // Subscribe registers a watcher for kind and returns its event channel.
 //
-// Both hooks run while publishers are locked out, and the subscription is only
-// made visible afterwards. That ordering is what makes the replay-precedes-live
-// guarantee hold without an asynchronous replay goroutine, and what keeps
-// in-flight events for earlier writes away from a new subscriber.
+// The snapshot runs while publishers are locked out, and the subscription is
+// only made visible afterwards. That ordering is what makes the
+// replay-precedes-live guarantee hold without an asynchronous replay goroutine.
 //
 // The returned channel is closed when ctx is cancelled, when the watch
 // overflows, or when the hub is closed.
@@ -100,14 +89,6 @@ func (h *Hub[T]) Subscribe(ctx context.Context, kind string, cfg *store.WatchCfg
 	if h.closed {
 		h.mu.Unlock()
 		return nil, store.ErrClosed
-	}
-	// Drain what is already committed to the existing subscribers first, so none
-	// of it can spill into the subscription being created below.
-	if hooks.CatchUp != nil {
-		if err := hooks.CatchUp(h.publishLocked); err != nil {
-			h.mu.Unlock()
-			return nil, err
-		}
 	}
 	if cfg.Initial && hooks.Snapshot != nil && s.wants(store.EventTypeCreate) {
 		evs, err := hooks.Snapshot()
@@ -147,12 +128,6 @@ func (h *Hub[T]) Publish(kind string, evs ...*store.Event[T]) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.publishLocked(kind, evs...)
-}
-
-// publishLocked is Publish's body, for callers that already hold the hub lock —
-// namely the Hooks callbacks in Subscribe.
-func (h *Hub[T]) publishLocked(kind string, evs ...*store.Event[T]) {
 	for s := range h.subs[kind] {
 		for _, ev := range evs {
 			s.enqueue(ev)

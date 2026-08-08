@@ -49,11 +49,23 @@ type storePG[T any] struct {
 	mu     sync.RWMutex
 	closed bool
 
-	// drainMu guards the outbox cursor and the per-kind drain state. Watch's
-	// CatchUp hook shares them with the background drain, so that "everything
-	// committed so far has been published" is a state both can establish.
-	drainMu  sync.Mutex
-	lastID   map[string]int64
+	// drainMu serializes the outbox drain against Watch. It is held across a
+	// whole batch — read, publish, advance the cursor — and across Watch's
+	// catch-up plus subscribe. Guarding only the cursor is not enough: a drain
+	// that has read a batch but not yet published it would otherwise deliver
+	// those events into a subscription registered in the meantime, which is
+	// exactly the "events that predate the watcher" bug.
+	//
+	// Lock order is drainMu -> hub lock. The hub lock is only ever taken inside
+	// Publish and Subscribe, after the pooled connection has been released, so
+	// the hub lock never covers I/O and the two can never deadlock.
+	drainMu sync.Mutex
+	lastID  map[string]int64
+
+	// stateMu guards the per-kind drain bookkeeping only. It is separate from
+	// drainMu so that a NOTIFY arriving during a long drain (or during a Watch)
+	// can record itself without blocking the listen loop.
+	stateMu  sync.Mutex
 	draining map[string]*drainState
 	// startID is where a kind's cursor begins when it is first seen: the outbox
 	// high-water mark at the time this store opened. Starting from 0 instead
@@ -655,21 +667,26 @@ func (s *storePG[T]) Watch(ctx context.Context, kind string, opts ...store.Watch
 		}
 	}
 
-	// Both hooks run while the hub lock is held, which locks out the drain loop.
-	//
-	// CatchUp is what this backend needs and the in-process ones do not: Set
-	// returns as soon as its transaction commits, while the matching event is
-	// still working its way through NOTIFY and the outbox drain. Subscribing
+	// Set returns as soon as its transaction commits, while the matching event
+	// is still working its way through NOTIFY and the outbox drain. Subscribing
 	// without first flushing that backlog hands the new watcher events for
-	// writes that predate it — which is what the old test suite was sleeping a
-	// second to avoid.
+	// writes that predate it — which is what the old test suite slept a second
+	// to avoid.
+	//
+	// Holding drainMu across the catch-up and the subscribe is what makes the
+	// flush stick: it locks out the drain loop entirely, including a batch it
+	// has already read but not yet published.
 	//
 	// The watch itself is bound to ctx, not opCtx: Options.Timeout bounds the
 	// catch-up and snapshot queries, not the lifetime of the watch.
+	s.drainMu.Lock()
+	defer s.drainMu.Unlock()
+
+	if err := s.catchUpLocked(opCtx, kind); err != nil {
+		return nil, err
+	}
+
 	return s.hub.Subscribe(ctx, kind, cfg, watchhub.Hooks[T]{
-		CatchUp: func(emit watchhub.EmitFunc[T]) error {
-			return s.catchUp(opCtx, kind, emit)
-		},
 		Snapshot: func() ([]*store.Event[T], error) {
 			return s.snapshot(opCtx, kind)
 		},
@@ -717,20 +734,18 @@ func (s *storePG[T]) signalListenReady() {
 	})
 }
 
-// drainBatch publishes one batch of outbox rows for kind and advances the
-// cursor, reporting whether there was anything to read.
+// drainBatchLocked publishes one batch of outbox rows for kind and advances the
+// cursor, reporting whether there was anything to read. The caller must hold
+// drainMu for the whole call, which is what keeps a batch from being published
+// into a subscription created while it was being read.
 //
-// The rows are fully collected and the connection released before emit is
-// called: emit may contend for the hub lock, and a Watch holds that lock while
-// running its own queries, so publishing with a connection still checked out
-// could starve the pool.
-func (s *storePG[T]) drainBatch(ctx context.Context, kind string, emit watchhub.EmitFunc[T]) (bool, error) {
-	s.drainMu.Lock()
+// The rows are fully collected and the connection released before publishing,
+// so the hub lock is never held across I/O.
+func (s *storePG[T]) drainBatchLocked(ctx context.Context, kind string) (bool, error) {
 	cursor, seen := s.lastID[kind]
 	if !seen {
 		cursor = s.startID
 	}
-	s.drainMu.Unlock()
 
 	qctx, qcancel := context.WithTimeout(ctx, s.timeout)
 	rows, err := s.pool.Query(qctx, `
@@ -784,26 +799,24 @@ SELECT id, key, etype, value
 		return false, nil
 	}
 
-	emit(kind, evs...)
+	s.hub.Publish(kind, evs...)
 
-	s.drainMu.Lock()
 	if cur, seen := s.lastID[kind]; !seen || highest > cur {
 		s.lastID[kind] = highest
 	}
-	s.drainMu.Unlock()
 	return true, nil
 }
 
-// catchUp drains kind to exhaustion. It is called from Watch's CatchUp hook with
-// the hub lock held, so emit is the hub's locked publish and the caller is
-// guaranteed that on return everything committed before the subscription has
-// already been handed to the subscribers that existed before it.
-func (s *storePG[T]) catchUp(ctx context.Context, kind string, emit watchhub.EmitFunc[T]) error {
+// catchUpLocked drains kind to exhaustion. The caller must hold drainMu and keep
+// holding it through Subscribe: on return, everything committed so far has been
+// handed to the subscribers that already exist, and no drain can publish again
+// until the lock is released.
+func (s *storePG[T]) catchUpLocked(ctx context.Context, kind string) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		more, err := s.drainBatch(ctx, kind, emit)
+		more, err := s.drainBatchLocked(ctx, kind)
 		if err != nil {
 			return err
 		}
@@ -814,7 +827,7 @@ func (s *storePG[T]) catchUp(ctx context.Context, kind string, emit watchhub.Emi
 }
 
 func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
-	s.drainMu.Lock()
+	s.stateMu.Lock()
 	st := s.draining[kind]
 	if st == nil {
 		st = &drainState{}
@@ -822,18 +835,20 @@ func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
 	}
 	if st.running {
 		st.pending = true
-		s.drainMu.Unlock()
+		s.stateMu.Unlock()
 		return
 	}
 	st.running = true
-	s.drainMu.Unlock()
+	s.stateMu.Unlock()
 
 	s.listenWG.Add(1)
 	go func() {
 		defer s.listenWG.Done()
 		for {
 			for ctx.Err() == nil {
-				more, err := s.drainBatch(ctx, kind, s.hub.Publish)
+				s.drainMu.Lock()
+				more, err := s.drainBatchLocked(ctx, kind)
+				s.drainMu.Unlock()
 				if err != nil {
 					select {
 					case <-ctx.Done():
@@ -846,17 +861,17 @@ func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
 				}
 			}
 
-			s.drainMu.Lock()
+			s.stateMu.Lock()
 			if st.pending && ctx.Err() == nil {
 				// A NOTIFY landed while we were draining; go round again rather
 				// than exiting and losing it.
 				st.pending = false
-				s.drainMu.Unlock()
+				s.stateMu.Unlock()
 				continue
 			}
 			st.running = false
 			st.pending = false
-			s.drainMu.Unlock()
+			s.stateMu.Unlock()
 			return
 		}
 	}()

@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -210,6 +211,58 @@ func TestCrossInstanceWatch(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("a write on one instance never reached a watcher on another")
+	}
+}
+
+// A watcher must never see events for writes that happened before it
+// subscribed. Set returns when its transaction commits, but the matching event
+// is still travelling through NOTIFY and the outbox drain, so Watch has to flush
+// that backlog — including a batch the drain has already read but not yet
+// published — before the subscription becomes visible.
+//
+// Deliberately no sleep before Watch: the sleep is what used to hide this.
+func TestWatchIgnoresWritesFromBeforeSubscribe(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	defer s.Close()
+
+	for i := range 50 {
+		if _, err := s.Set(ctx, "k", fmt.Sprintf("k%03d", i), TestData{Name: "before", Value: i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch, err := s.Watch(watchCtx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("watch channel closed unexpectedly")
+		}
+		t.Fatalf("watcher received %s %s/%s (%+v) for a write that predates it",
+			ev.EventType, ev.Kind, ev.Name, ev.Object)
+	case <-time.After(3 * time.Second):
+	}
+
+	// And it still works: a write after subscribing does arrive.
+	if _, err := s.Set(ctx, "k", "after", TestData{Name: "after", Value: 1}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("watch channel closed before the post-subscribe write arrived")
+		}
+		if ev.Name != "after" {
+			t.Errorf("got an event for %q, want the post-subscribe write %q", ev.Name, "after")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("a write made after subscribing never arrived")
 	}
 }
 
