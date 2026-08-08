@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -277,7 +278,11 @@ func TestDumpIncludesVersion(t *testing.T) {
 	if _, err := s.Set(ctx, "k", "a", TestData{Name: "v2"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Dump(); !strings.Contains(got, "k/a v2") {
-		t.Errorf("Dump() = %q, want it to report version 2", got)
+	var buf bytes.Buffer
+	if err := s.(store.Dumper).Dump(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "k/a v2") {
+		t.Errorf("Dump() = %q, want it to report version 2", buf.String())
 	}
 }

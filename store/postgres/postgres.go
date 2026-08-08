@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strconv"
@@ -406,20 +408,20 @@ func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error
 	return out, rows.Err()
 }
 
-func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (bool, error) {
+func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
 	ctx, cancel, err := s.guard(ctx)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	defer cancel()
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -428,23 +430,23 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (bool, 
          ON CONFLICT (ns_id,kind,key) DO NOTHING`,
 		s.ns, kind, key, enc)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
-	created := ct.RowsAffected() == 1
+	result := store.SetCreated
 
-	if !created {
+	if ct.RowsAffected() != 1 {
 		var cur []byte
 		err = tx.QueryRow(ctx,
 			`SELECT value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 AND key=$3`,
 			s.ns, kind, key).Scan(&cur)
 		if err != nil {
-			return false, err
+			return store.SetUnchanged, err
 		}
 		if bytes.Equal(cur, enc) {
 			if err := tx.Commit(ctx); err != nil {
-				return false, err
+				return store.SetUnchanged, err
 			}
-			return false, nil
+			return store.SetUnchanged, nil
 		}
 		if _, err := tx.Exec(ctx,
 			`UPDATE zestor_kv
@@ -453,23 +455,24 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (bool, 
                    updated_at=now()
              WHERE ns_id=$1 AND kind=$2 AND key=$3`,
 			s.ns, kind, key, enc); err != nil {
-			return false, err
+			return store.SetUnchanged, err
 		}
+		result = store.SetUpdated
 	}
 
-	etype := store.EventTypeUpdate
-	if created {
-		etype = store.EventTypeCreate
+	etype := store.EventTypeCreate
+	if result == store.SetUpdated {
+		etype = store.EventTypeUpdate
 	}
 	if err := s.appendOutbox(ctx, tx, kind, key, etype, enc); err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 
-	return created, nil
+	return result, nil
 }
 
 func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
@@ -532,7 +535,7 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 	return true, nil
 }
 
-func (s *storePG[T]) SetAll(ctx context.Context, kind string, values map[string]T) error {
+func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	ctx, cancel, err := s.guard(ctx)
 	if err != nil {
 		return err
@@ -545,7 +548,9 @@ func (s *storePG[T]) SetAll(ctx context.Context, kind string, values map[string]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	existingKeys, err := s.existingKeys(ctx, tx, kind)
+	// The existing encoded values, not just the key set: a key whose bytes are
+	// unchanged must be skipped entirely, the way a single Set skips it.
+	existing, err := s.existingRows(ctx, tx, kind)
 	if err != nil {
 		return err
 	}
@@ -557,20 +562,21 @@ func (s *storePG[T]) SetAll(ctx context.Context, kind string, values map[string]
 		if err != nil {
 			return err
 		}
+		prev, existed := existing[k]
+		if existed && bytes.Equal(prev, b) {
+			continue
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO zestor_kv(ns_id,kind,key,value) VALUES($1,$2,$3,$4)
              ON CONFLICT (ns_id,kind,key) DO UPDATE
              SET value=EXCLUDED.value,
-                 version = CASE WHEN zestor_kv.value <> EXCLUDED.value
-                                THEN zestor_kv.version+1
-                                ELSE zestor_kv.version END,
-                 updated_at = CASE WHEN zestor_kv.value <> EXCLUDED.value
-                                   THEN now() ELSE zestor_kv.updated_at END`,
+                 version = zestor_kv.version+1,
+                 updated_at = now()`,
 			s.ns, kind, k, b); err != nil {
 			return err
 		}
 		etype := store.EventTypeCreate
-		if _, existed := existingKeys[k]; existed {
+		if existed {
 			etype = store.EventTypeUpdate
 		}
 		if err := s.appendOutbox(ctx, tx, kind, k, etype, b); err != nil {
@@ -632,20 +638,23 @@ func (s *storePG[T]) appendOutbox(ctx context.Context, tx pgx.Tx, kind, key stri
 	return err
 }
 
-func (s *storePG[T]) existingKeys(ctx context.Context, tx pgx.Tx, kind string) (map[string]struct{}, error) {
-	rows, err := tx.Query(ctx, `SELECT key FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
+// existingRows reads the kind's encoded values. It holds one kind in memory,
+// which is the same order of data a bulk write already carries.
+func (s *storePG[T]) existingRows(ctx context.Context, tx pgx.Tx, kind string) (map[string][]byte, error) {
+	rows, err := tx.Query(ctx, `SELECT key, value FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make(map[string]struct{})
+	out := make(map[string][]byte)
 	for rows.Next() {
 		var k string
-		if err := rows.Scan(&k); err != nil {
+		var v []byte
+		if err := rows.Scan(&k, &v); err != nil {
 			return nil, err
 		}
-		out[k] = struct{}{}
+		out[k] = v
 	}
 	return out, rows.Err()
 }
@@ -1004,26 +1013,39 @@ func (s *storePG[T]) Close() error {
 	return nil
 }
 
-func (s *storePG[T]) Dump() string {
-	var sb strings.Builder
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+// Dump implements store.Dumper.
+func (s *storePG[T]) Dump(ctx context.Context, w io.Writer) error {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return err
+	}
 	defer cancel()
+
 	rows, err := s.pool.Query(ctx,
 		`SELECT kind, key, OCTET_LENGTH(value), version, updated_at
            FROM zestor_kv
           WHERE ns_id=$1
        ORDER BY kind, key`, s.ns)
 	if err != nil {
-		return err.Error()
+		return err
 	}
 	defer rows.Close()
+
+	bw := bufio.NewWriter(w)
 	for rows.Next() {
 		var kind, key string
 		var sz, ver int
 		var ts time.Time
-		if err := rows.Scan(&kind, &key, &sz, &ver, &ts); err == nil {
-			fmt.Fprintf(&sb, "%s/%s v%d (%dB) %s\n", kind, key, ver, sz, ts.UTC().Format(time.RFC3339Nano))
+		if err := rows.Scan(&kind, &key, &sz, &ver, &ts); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s\n",
+			kind, key, ver, sz, ts.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
 		}
 	}
-	return sb.String()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return bw.Flush()
 }

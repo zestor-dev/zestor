@@ -48,11 +48,14 @@ func main() {
     }
     defer s.Close()
 
-    ch, cancel, err := s.Watch("users", store.WithInitialReplay[User]())
+    watchCtx, stopWatching := context.WithCancel(ctx)
+    defer stopWatching()
+
+    ch, err := s.Watch(watchCtx, "users", store.WithInitialReplay[User]())
     if err != nil {
         log.Fatal(err)
     }
-    defer cancel()
+    defer stopWatching()
 
     go func() {
         for ev := range ch {
@@ -60,7 +63,7 @@ func main() {
         }
     }()
 
-    _, _ = s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    _, _ = s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
 }
 ```
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"reflect"
 )
 
@@ -29,9 +30,36 @@ type Reader[T any] interface {
 	GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
 
+// SetResult reports what a write actually did. A bare "created" boolean could
+// not distinguish an update from a write that changed nothing, which is
+// information every backend computes and used to discard.
+type SetResult uint8
+
+const (
+	// SetUnchanged means the value compared equal to what was already stored:
+	// nothing was written and no event was emitted.
+	SetUnchanged SetResult = iota
+	// SetCreated means the key did not exist and now does.
+	SetCreated
+	// SetUpdated means the key existed and its value changed.
+	SetUpdated
+)
+
+func (r SetResult) String() string {
+	switch r {
+	case SetCreated:
+		return "created"
+	case SetUpdated:
+		return "updated"
+	case SetUnchanged:
+		return "unchanged"
+	}
+	return "unknown"
+}
+
 // Writer provides write access to the store.
 type Writer[T any] interface {
-	Set(ctx context.Context, kind, key string, value T) (created bool, err error)
+	Set(ctx context.Context, kind, key string, value T) (SetResult, error)
 	// SetFn atomically applies fn to the value stored at kind/key. It reports
 	// whether the stored value actually changed: false means either fn returned
 	// a value equal to the previous one, or an error occurred.
@@ -39,7 +67,15 @@ type Writer[T any] interface {
 	// fn runs while the store's write lock is held. It must not call back into
 	// the store; doing so deadlocks.
 	SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (changed bool, err error)
-	SetAll(ctx context.Context, kind string, values map[string]T) error
+
+	// SetMany writes several values to one kind. It merges: keys already present
+	// in the kind but absent from values are left alone, and no delete events
+	// are emitted for them. Keys whose value compares equal to what is already
+	// stored are skipped, exactly as a single Set would skip them, so a
+	// re-import of unchanged data emits nothing.
+	//
+	// Events are emitted in key order, so the stream is deterministic.
+	SetMany(ctx context.Context, kind string, values map[string]T) error
 	Delete(ctx context.Context, kind, key string) (existed bool, prev T, err error)
 }
 
@@ -82,7 +118,18 @@ type Store[T any] interface {
 	Writer[T]
 	Watcher[T]
 	Close() error
-	Dump() string
+}
+
+// Dumper is an optional debugging capability. It is deliberately not part of
+// Store: it is not something callers build on, it can move an unbounded amount
+// of data, and forcing it into the core interface obliged every implementation
+// to provide one with no way to report failure.
+//
+//	if d, ok := s.(store.Dumper); ok {
+//	    _ = d.Dump(ctx, os.Stdout)
+//	}
+type Dumper interface {
+	Dump(ctx context.Context, w io.Writer) error
 }
 
 type KeyValue[T any] struct {

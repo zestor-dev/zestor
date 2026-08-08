@@ -22,12 +22,12 @@ Read-only access to the store.
 
 ```go
 type Reader[T any] interface {
-    Get(kind, key string) (val T, ok bool, err error)
-    List(kind string, filter ...FilterFunc[T]) (map[string]T, error)
-    Count(kind string) (int, error)
-    Keys(kind string) ([]string, error)
-    Values(kind string) ([]KeyValue[T], error)
-    GetAll() (map[string]map[string]T, error)
+    Get(ctx context.Context, kind, key string) (val T, ok bool, err error)
+    List(ctx context.Context, kind string, filter ...FilterFunc[T]) (map[string]T, error)
+    Count(ctx context.Context, kind string) (int, error)
+    Keys(ctx context.Context, kind string) ([]string, error)
+    Values(ctx context.Context, kind string) ([]KeyValue[T], error)
+    GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
 ```
 
@@ -37,10 +37,10 @@ Write access to the store.
 
 ```go
 type Writer[T any] interface {
-    Set(kind, key string, value T) (created bool, err error)
-    SetFn(kind, key string, fn func(v T) (T, error)) (changed bool, err error)
-    SetAll(kind string, values map[string]T) error
-    Delete(kind, key string) (existed bool, prev T, err error)
+    Set(ctx context.Context, kind, key string, value T) (SetResult, error)
+    SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (changed bool, err error)
+    SetMany(ctx context.Context, kind string, values map[string]T) error
+    Delete(ctx context.Context, kind, key string) (existed bool, prev T, err error)
 }
 ```
 
@@ -50,7 +50,7 @@ Watch access to the store.
 
 ```go
 type Watcher[T any] interface {
-    Watch(kind string, opts ...WatchOption[T]) (r <-chan *Event[T], cancel func(), err error)
+    Watch(ctx context.Context, kind string, opts ...WatchOption[T]) (<-chan *Event[T], error)
 }
 ```
 
@@ -75,7 +75,6 @@ type Store[T any] interface {
     Writer[T]
     Watcher[T]
     Close() error
-    Dump() string
 }
 ```
 
@@ -231,7 +230,7 @@ var (
 **Usage:**
 
 ```go
-_, _, err := s.Get("users", "alice")
+_, _, err := s.Get(ctx, "users", "alice")
 if errors.Is(err, store.ErrClosed) {
     // Handle closed store
 }

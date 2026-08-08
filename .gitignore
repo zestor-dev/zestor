@@ -2,3 +2,4 @@
 docs/public/
 docs/resources/_gen/
 docs/node_modules/
+go.work.sum

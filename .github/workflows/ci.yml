@@ -9,7 +9,74 @@ on:
 permissions:
   contents: read
 
+env:
+  STATICCHECK_VERSION: "2025.1.1"
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            codec/go.sum
+            store/sqlite/go.sum
+            store/postgres/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [[ -n "$unformatted" ]]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+
+      - name: go vet
+        run: |
+          for m in . codec store/sqlite store/postgres; do
+            echo "::group::go vet $m"
+            (cd "$m" && go vet ./...) || exit 1
+            echo "::endgroup::"
+          done
+
+      - name: staticcheck
+        run: |
+          for m in . codec store/sqlite store/postgres; do
+            echo "::group::staticcheck $m"
+            (cd "$m" && go run honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} ./...) || exit 1
+            echo "::endgroup::"
+          done
+
+  modules:
+    name: Module graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The workspace hides broken requires from every other job, so check the
+      # published module graph explicitly with GOWORK=off. This is what catches
+      # a submodule pinned to a version nobody can fetch — the state that made
+      # store/sqlite and store/postgres impossible to `go get`.
+      - name: Submodule requires resolve without the workspace
+        run: |
+          for m in store/sqlite store/postgres; do
+            echo "::group::go mod download $m"
+            (cd "$m" && GOWORK=off go mod download \
+              github.com/zestor-dev/zestor \
+              github.com/zestor-dev/zestor/codec) || exit 1
+            echo "::endgroup::"
+          done
+
   unit:
     name: Unit (root, codec, sqlite)
     runs-on: ubuntu-latest
@@ -23,7 +90,7 @@ jobs:
             codec/go.sum
             store/sqlite/go.sum
 
-      - name: Root module (store, gomap, examples)
+      - name: Root module (store, gomap, storetest, examples)
         run: go test -count=1 -race ./...
 
       - name: Codec module
@@ -70,13 +137,18 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    needs: [unit, postgres-store]
+    needs: [lint, modules, unit, postgres-store]
     if: always()
     steps:
       - name: OK
         run: |
-          if [[ "${{ needs.unit.result }}" != "success" ]] || [[ "${{ needs.postgres-store.result }}" != "success" ]]; then
-            echo "unit: ${{ needs.unit.result }}, postgres-store: ${{ needs.postgres-store.result }}"
-            exit 1
-          fi
-          echo "All jobs passed."
+          failed=0
+          for job in "lint:${{ needs.lint.result }}" \
+                     "modules:${{ needs.modules.result }}" \
+                     "unit:${{ needs.unit.result }}" \
+                     "postgres-store:${{ needs.postgres-store.result }}"; do
+            name="${job%%:*}"; result="${job#*:}"
+            echo "$name: $result"
+            [[ "$result" == "success" ]] || failed=1
+          done
+          exit $failed

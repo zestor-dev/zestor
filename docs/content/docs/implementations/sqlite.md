@@ -46,9 +46,9 @@ func main() {
     defer s.Close()
 
     // Same API as gomap
-    s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
     
-    user, ok, _ := s.Get("users", "alice")
+    user, ok, _ := s.Get(ctx, "users", "alice")
     if ok {
         fmt.Println(user.Name) // Alice
     }
@@ -125,11 +125,14 @@ Codec: &codec.YAML{}
 Watch works via in-process pub/sub:
 
 ```go
-ch, cancel, _ := s.Watch("users",
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, _ := s.Watch(watchCtx, "users",
     store.WithInitialReplay[User](),
     store.WithEventTypes[User](store.EventTypeCreate),
 )
-defer cancel()
+defer stopWatching()
 
 for event := range ch {
     fmt.Printf("New user: %s\n", event.Object.Name)
@@ -161,13 +164,13 @@ Each record has an auto-incrementing version:
 
 ```go
 // First write: version = 1
-s.Set("config", "app", Config{Debug: false})
+s.Set(ctx, "config", "app", Config{Debug: false})
 
 // Update: version = 2
-s.Set("config", "app", Config{Debug: true})
+s.Set(ctx, "config", "app", Config{Debug: true})
 
 // No-op (same bytes): version stays 2
-s.Set("config", "app", Config{Debug: true})
+s.Set(ctx, "config", "app", Config{Debug: true})
 ```
 
 ## Performance Characteristics
@@ -177,7 +180,7 @@ s.Set("config", "app", Config{Debug: true})
 | Get | Fast (indexed lookup) |
 | Set | Good (single row upsert) |
 | List | Good (indexed by kind) |
-| SetAll | Batched in transaction |
+| SetMany | Batched in transaction |
 | Watch | In-memory pub/sub |
 
 ### Optimizing Performance
@@ -185,7 +188,7 @@ s.Set("config", "app", Config{Debug: true})
 1. **Use shared cache**: `?cache=shared`
 2. **Keep WAL enabled**: Default setting
 3. **Set busy timeout**: Prevents lock errors
-4. **Batch writes**: Use `SetAll` for bulk operations
+4. **Batch writes**: Use `SetMany` for bulk operations
 
 ## Limitations
 
@@ -229,7 +232,7 @@ Ensure WAL is enabled and batch operations:
 
 ```go
 // Instead of multiple Sets
-s.SetAll("items", map[string]Item{
+s.SetMany(ctx, "items", map[string]Item{
     "a": itemA,
     "b": itemB,
     "c": itemC,
@@ -273,8 +276,11 @@ func main() {
     defer s.Close()
 
     // Watch for changes
-    ch, cancel, _ := s.Watch("notes", store.WithInitialReplay[Note]())
-    defer cancel()
+    watchCtx, stopWatching := context.WithCancel(ctx)
+    defer stopWatching()
+
+    ch, _ := s.Watch(watchCtx, "notes", store.WithInitialReplay[Note]())
+    defer stopWatching()
 
     go func() {
         for ev := range ch {
@@ -283,20 +289,20 @@ func main() {
     }()
 
     // Create notes
-    s.Set("notes", "note-1", Note{
+    s.Set(ctx, "notes", "note-1", Note{
         Title:   "Meeting Notes",
         Content: "Discussed Q4 planning...",
         Updated: time.Now(),
     })
 
-    s.Set("notes", "note-2", Note{
+    s.Set(ctx, "notes", "note-2", Note{
         Title:   "Ideas",
         Content: "New feature brainstorm...",
         Updated: time.Now(),
     })
 
     // List all notes
-    notes, _ := s.List("notes")
+    notes, _ := s.List(ctx, "notes")
     fmt.Printf("\nTotal notes: %d\n", len(notes))
 
     // Data persists! Restart the app and notes are still there.

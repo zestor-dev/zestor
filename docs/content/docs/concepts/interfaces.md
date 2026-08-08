@@ -15,25 +15,25 @@ Zestor follows the **Interface Segregation Principle** by splitting its function
 ```go
 // Reader provides read-only access
 type Reader[T any] interface {
-    Get(kind, key string) (val T, ok bool, err error)
-    List(kind string, filter ...FilterFunc[T]) (map[string]T, error)
-    Count(kind string) (int, error)
-    Keys(kind string) ([]string, error)
-    Values(kind string) ([]KeyValue[T], error)
-    GetAll() (map[string]map[string]T, error)
+    Get(ctx context.Context, kind, key string) (val T, ok bool, err error)
+    List(ctx context.Context, kind string, filter ...FilterFunc[T]) (map[string]T, error)
+    Count(ctx context.Context, kind string) (int, error)
+    Keys(ctx context.Context, kind string) ([]string, error)
+    Values(ctx context.Context, kind string) ([]KeyValue[T], error)
+    GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
 
 // Writer provides write access
 type Writer[T any] interface {
-    Set(kind, key string, value T) (created bool, err error)
-    SetFn(kind, key string, fn func(v T) (T, error)) (changed bool, err error)
-    SetAll(kind string, values map[string]T) error
-    Delete(kind, key string) (existed bool, prev T, err error)
+    Set(ctx context.Context, kind, key string, value T) (SetResult, error)
+    SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (changed bool, err error)
+    SetMany(ctx context.Context, kind string, values map[string]T) error
+    Delete(ctx context.Context, kind, key string) (existed bool, prev T, err error)
 }
 
 // Watcher provides watch access
 type Watcher[T any] interface {
-    Watch(kind string, opts ...WatchOption[T]) (r <-chan *Event[T], cancel func(), err error)
+    Watch(ctx context.Context, kind string, opts ...WatchOption[T]) (<-chan *Event[T], error)
 }
 
 // ReadWriter combines Reader and Writer
@@ -48,7 +48,6 @@ type Store[T any] interface {
     Writer[T]
     Watcher[T]
     Close() error
-    Dump() string
 }
 ```
 
@@ -61,8 +60,8 @@ Pass only the access your code needs:
 ```go
 // This function can't accidentally modify data
 func generateReport(r store.Reader[User]) Report {
-    users, _ := r.List("users")
-    // r.Set(...) ← Compile error! Reader has no Set
+    users, _ := r.List(ctx, "users")
+    // r.Set(ctx, ...) ← Compile error! Reader has no Set
     return buildReport(users)
 }
 ```
@@ -117,12 +116,12 @@ func NewReportService(r store.Reader[User]) *ReportService {
 }
 
 func (s *ReportService) GetUserCount() int {
-    count, _ := s.store.Count("users")
+    count, _ := s.store.Count(ctx, "users")
     return count
 }
 
 func (s *ReportService) GetAdmins() []User {
-    users, _ := s.store.List("users", func(k string, u User) bool {
+    users, _ := s.store.List(ctx, "users", func(k string, u User) bool {
         return u.Role == "admin"
     })
     // Convert to slice...
@@ -142,11 +141,11 @@ func NewUserImporter(w store.Writer[User]) *UserImporter {
 }
 
 func (i *UserImporter) Import(users map[string]User) error {
-    return i.store.SetAll("users", users)
+    return i.store.SetMany(ctx, "users", users)
 }
 
 func (i *UserImporter) Delete(key string) error {
-    _, _, err := i.store.Delete("users", key)
+    _, _, err := i.store.Delete(ctx, "users", key)
     return err
 }
 ```
@@ -163,11 +162,10 @@ func NewEventProcessor(w store.Watcher[User]) *EventProcessor {
 }
 
 func (p *EventProcessor) ProcessEvents(ctx context.Context) error {
-    ch, cancel, err := p.store.Watch("users")
+    ch, err := p.store.Watch(ctx, "users")
     if err != nil {
         return err
     }
-    defer cancel()
 
     for {
         select {
@@ -195,11 +193,11 @@ func NewSyncService(rw store.ReadWriter[User]) *SyncService {
 }
 
 func (s *SyncService) Upsert(key string, user User) error {
-    existing, ok, _ := s.store.Get("users", key)
+    existing, ok, _ := s.store.Get(ctx, "users", key)
     if ok && existing.Email == user.Email {
         return nil // No change needed
     }
-    _, err := s.store.Set("users", key, user)
+    _, err := s.store.Set(ctx, "users", key, user)
     return err
 }
 ```

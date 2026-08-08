@@ -76,8 +76,8 @@ func main() {
     s := gomap.NewMemStore[string](store.StoreOptions[string]{})
     defer s.Close()
     
-    s.Set("test", "hello", "world")
-    val, ok, _ := s.Get("test", "hello")
+    s.Set(ctx, "test", "hello", "world")
+    val, ok, _ := s.Get(ctx, "test", "hello")
     
     if ok {
         fmt.Println("Zestor is working:", val)
