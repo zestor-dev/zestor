@@ -12,8 +12,16 @@ A generic, type-safe, in-memory key-value store for Go with watch/subscribe capa
 - **Multi-kind** — Organize data by "kind" (like tables/collections)
 - **Thread-safe** — Concurrent read/write with `sync.RWMutex`
 - **Watch/Subscribe** — Real-time notifications for create, update, and delete events
-- **Validation** — Per-kind validation functions
-- **Change detection** — Configurable compare function to suppress duplicate events
+- **Ordered, gap-free watches** — see [Delivery guarantees](#delivery-guarantees)
+
+### Backend support
+
+| | `gomap` | `sqlite` | `postgres` |
+|---|---|---|---|
+| Persistence | — | ✅ | ✅ |
+| Cross-process watch | — | — | ✅ |
+| Per-kind validation (`ValidateFns`) | ✅ | — | — |
+| Custom change detection (`CompareFn`) | ✅ | — | — |
 
 ## Requirements
 
@@ -33,7 +41,9 @@ Besides [`store/gomap`](store/gomap/), optional backends include [`store/sqlite`
 package main
 
 import (
+    "context"
     "fmt"
+
     "github.com/zestor-dev/zestor/store"
     "github.com/zestor-dev/zestor/store/gomap"
 )
@@ -44,49 +54,70 @@ type User struct {
 }
 
 func main() {
+    ctx := context.Background()
+
     // Create a new store
     s := gomap.NewMemStore[User](store.StoreOptions[User]{})
     defer s.Close()
 
     // Set a value
-    created, _ := s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    created, _ := s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
     fmt.Println("Created:", created) // true
 
     // Get a value
-    user, ok, _ := s.Get("users", "alice")
+    user, ok, _ := s.Get(ctx, "users", "alice")
     if ok {
         fmt.Println("Found:", user.Name)
     }
 
     // List all users
-    users, _ := s.List("users")
+    users, _ := s.List(ctx, "users")
     fmt.Println("Total users:", len(users))
 
     // Delete
-    existed, prev, _ := s.Delete("users", "alice")
+    existed, prev, _ := s.Delete(ctx, "users", "alice")
     fmt.Println("Deleted:", existed, prev.Name)
 }
 ```
 
 ## Watching for Changes
 
+A watch lives until its context is cancelled — that is the only way to unsubscribe.
+
 ```go
 // Watch for all events on "users" kind
-ch, cancel, _ := s.Watch("users")
-defer cancel()
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, _ := s.Watch(watchCtx, "users")
 
 go func() {
     for event := range ch {
+        // A watcher that falls behind is told so rather than silently losing
+        // events: this is the last event, and the channel closes next.
+        if event.Err != nil {
+            log.Printf("watch ended: %v — re-list and re-watch to resync", event.Err)
+            return
+        }
         fmt.Printf("Event: %s %s/%s\n", event.EventType, event.Kind, event.Name)
     }
 }()
 
 // Watch with options
-ch, cancel, _ = s.Watch("users",
-    store.WithInitialReplay[User](),                    // Replay existing items as Create events
+ch, _ = s.Watch(watchCtx, "users",
+    store.WithInitialReplay[User](),                   // Replay existing items as Create events
     store.WithEventTypes[User](store.EventTypeDelete), // Only delete events
 )
 ```
+
+### Delivery guarantees
+
+- **Ordering** — events arrive in the order the writes were applied.
+- **Replay precedes live** — with `WithInitialReplay`, every replayed event arrives before
+  any event for a write that happened after the `Watch` call.
+- **No silent gaps** — a consumer that falls roughly `BufferSize` events behind receives a
+  final event carrying `ErrWatchOverflow` and then the channel closes, rather than quietly
+  missing events. Event type filters never suppress that signal.
 
 ## Validation
 
@@ -119,29 +150,31 @@ s := gomap.NewMemStore[User](store.StoreOptions[User]{
 
 ### Read Operations
 
+All methods take a `context.Context` as their first argument.
+
 | Method | Description |
 |--------|-------------|
-| `Get(kind, key)` | Get a single value |
-| `List(kind, filters...)` | List all values, optionally filtered |
-| `Keys(kind)` | Get all keys |
-| `Values(kind)` | Get all key-value pairs |
-| `Count(kind)` | Count items |
-| `GetAll()` | Get all kinds and their data |
+| `Get(ctx, kind, key)` | Get a single value |
+| `List(ctx, kind, filters...)` | List all values, optionally filtered |
+| `Keys(ctx, kind)` | Get all keys |
+| `Values(ctx, kind)` | Get all key-value pairs |
+| `Count(ctx, kind)` | Count items |
+| `GetAll(ctx)` | Get all kinds and their data |
 
 ### Write Operations
 
 | Method | Description |
 |--------|-------------|
-| `Set(kind, key, value)` | Create or update a value |
-| `SetAll(kind, values)` | Bulk set multiple values |
-| `SetFn(kind, key, fn)` | Update value using a transform function |
-| `Delete(kind, key)` | Delete a value |
+| `Set(ctx, kind, key, value)` | Create or update a value |
+| `SetAll(ctx, kind, values)` | Bulk set multiple values (merges; does not remove absent keys) |
+| `SetFn(ctx, kind, key, fn)` | Atomically update a value using a transform function |
+| `Delete(ctx, kind, key)` | Delete a value |
 
 ### Watch
 
 | Method | Description |
 |--------|-------------|
-| `Watch(kind, opts...)` | Subscribe to changes |
+| `Watch(ctx, kind, opts...)` | Subscribe to changes; cancel `ctx` to unsubscribe |
 
 ### Lifecycle
 
