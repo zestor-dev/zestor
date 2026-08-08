@@ -291,19 +291,22 @@ func (s *memStore[T]) Watch(ctx context.Context, kind string, opts ...store.Watc
 
 	// The snapshot runs under both mu (held here) and the hub lock, so it cannot
 	// interleave with a concurrent write: every replayed event is queued before
-	// any event that write would publish.
-	return s.hub.Subscribe(ctx, kind, cfg, func() ([]*store.Event[T], error) {
-		snap := s.kinds[kind]
-		out := make([]*store.Event[T], 0, len(snap))
-		for _, k := range slices.Sorted(maps.Keys(snap)) {
-			out = append(out, &store.Event[T]{
-				Kind:      kind,
-				Name:      k,
-				EventType: store.EventTypeCreate,
-				Object:    snap[k],
-			})
-		}
-		return out, nil
+	// any event that write would publish. No CatchUp hook is needed — events are
+	// published under mu by the write itself, so nothing is ever in flight.
+	return s.hub.Subscribe(ctx, kind, cfg, watchhub.Hooks[T]{
+		Snapshot: func() ([]*store.Event[T], error) {
+			snap := s.kinds[kind]
+			out := make([]*store.Event[T], 0, len(snap))
+			for _, k := range slices.Sorted(maps.Keys(snap)) {
+				out = append(out, &store.Event[T]{
+					Kind:      kind,
+					Name:      k,
+					EventType: store.EventTypeCreate,
+					Object:    snap[k],
+				})
+			}
+			return out, nil
+		},
 	})
 }
 

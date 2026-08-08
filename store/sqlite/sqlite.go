@@ -528,12 +528,16 @@ func (s *sqLiteStore[T]) Watch(ctx context.Context, kind string, opts ...store.W
 	}
 
 	// Holding writeMu across the snapshot is what guarantees that every replayed
-	// event is queued before any event a concurrent write would publish.
+	// event is queued before any event a concurrent write would publish. No
+	// CatchUp hook is needed — a write publishes before it releases writeMu, so
+	// nothing is ever in flight here.
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	return s.hub.Subscribe(ctx, kind, cfg, func() ([]*store.Event[T], error) {
-		return s.snapshot(ctx, kind)
+	return s.hub.Subscribe(ctx, kind, cfg, watchhub.Hooks[T]{
+		Snapshot: func() ([]*store.Event[T], error) {
+			return s.snapshot(ctx, kind)
+		},
 	})
 }
 

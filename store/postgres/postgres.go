@@ -49,6 +49,20 @@ type storePG[T any] struct {
 	mu     sync.RWMutex
 	closed bool
 
+	// drainMu guards the outbox cursor and the per-kind drain state. Watch's
+	// CatchUp hook shares them with the background drain, so that "everything
+	// committed so far has been published" is a state both can establish.
+	drainMu  sync.Mutex
+	lastID   map[string]int64
+	draining map[string]*drainState
+	// startID is where a kind's cursor begins when it is first seen: the outbox
+	// high-water mark at the time this store opened. Starting from 0 instead
+	// would make the first Watch replay the entire outbox history, which for an
+	// unpruned table is both a flood and a query that outlives Options.Timeout.
+	// Nothing written before this store existed can be owed to one of its
+	// watchers.
+	startID int64
+
 	listenCancel context.CancelFunc
 	listenWG     sync.WaitGroup
 
@@ -90,10 +104,17 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		ns:           o.Namespace,
 		timeout:      o.Timeout,
 		hub:          watchhub.New[T](),
+		lastID:       make(map[string]int64),
+		draining:     make(map[string]*drainState),
 		listenCancel: listenCancel,
 		listenReady:  make(chan struct{}),
 	}
 	if err := s.ensureSchema(ctx); err != nil {
+		listenCancel()
+		pool.Close()
+		return nil, err
+	}
+	if err := s.seedOutboxCursor(ctx); err != nil {
 		listenCancel()
 		pool.Close()
 		return nil, err
@@ -117,6 +138,21 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	}
 
 	return s, nil
+}
+
+// seedOutboxCursor records the outbox high-water mark at open time.
+func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	var maxID int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(id), 0) FROM zestor_outbox WHERE ns_id=$1`, s.ns).Scan(&maxID); err != nil {
+		return err
+	}
+	s.drainMu.Lock()
+	s.startID = maxID
+	s.drainMu.Unlock()
+	return nil
 }
 
 // guard rejects operations on a closed store, honours an already-cancelled
@@ -619,12 +655,24 @@ func (s *storePG[T]) Watch(ctx context.Context, kind string, opts ...store.Watch
 		}
 	}
 
-	// The snapshot runs while the hub lock is held, which locks out the drain
-	// loop: nothing it publishes can slip between the snapshot and the
-	// subscription. Note that the watch itself is bound to ctx, not opCtx —
-	// Options.Timeout bounds the snapshot query, not the lifetime of the watch.
-	return s.hub.Subscribe(ctx, kind, cfg, func() ([]*store.Event[T], error) {
-		return s.snapshot(opCtx, kind)
+	// Both hooks run while the hub lock is held, which locks out the drain loop.
+	//
+	// CatchUp is what this backend needs and the in-process ones do not: Set
+	// returns as soon as its transaction commits, while the matching event is
+	// still working its way through NOTIFY and the outbox drain. Subscribing
+	// without first flushing that backlog hands the new watcher events for
+	// writes that predate it — which is what the old test suite was sleeping a
+	// second to avoid.
+	//
+	// The watch itself is bound to ctx, not opCtx: Options.Timeout bounds the
+	// catch-up and snapshot queries, not the lifetime of the watch.
+	return s.hub.Subscribe(ctx, kind, cfg, watchhub.Hooks[T]{
+		CatchUp: func(emit watchhub.EmitFunc[T]) error {
+			return s.catchUp(opCtx, kind, emit)
+		},
+		Snapshot: func() ([]*store.Event[T], error) {
+			return s.snapshot(opCtx, kind)
+		},
 	})
 }
 
@@ -652,8 +700,15 @@ func (s *storePG[T]) snapshot(ctx context.Context, kind string) ([]*store.Event[
 	return out, rows.Err()
 }
 
+const outboxBatch = 256
+
 type drainState struct {
+	// running is set while a drain goroutine is working on this kind. pending
+	// records a NOTIFY that arrived while it was: without it, a notification
+	// landing between the drain's last empty query and its exit is dropped, and
+	// with no fallback poll those events wait for an unrelated later write.
 	running bool
+	pending bool
 }
 
 func (s *storePG[T]) signalListenReady() {
@@ -662,129 +717,152 @@ func (s *storePG[T]) signalListenReady() {
 	})
 }
 
-func (s *storePG[T]) listenLoop(ctx context.Context) {
-	var (
-		mu     sync.Mutex
-		lastID = make(map[string]int64)
-		state  = make(map[string]*drainState)
-	)
+// drainBatch publishes one batch of outbox rows for kind and advances the
+// cursor, reporting whether there was anything to read.
+//
+// The rows are fully collected and the connection released before emit is
+// called: emit may contend for the hub lock, and a Watch holds that lock while
+// running its own queries, so publishing with a connection still checked out
+// could starve the pool.
+func (s *storePG[T]) drainBatch(ctx context.Context, kind string, emit watchhub.EmitFunc[T]) (bool, error) {
+	s.drainMu.Lock()
+	cursor, seen := s.lastID[kind]
+	if !seen {
+		cursor = s.startID
+	}
+	s.drainMu.Unlock()
 
-	triggerDrain := func(kind string) {
-		mu.Lock()
-		st := state[kind]
-		if st == nil {
-			st = &drainState{}
-			state[kind] = st
-		}
-		if st.running {
-			mu.Unlock()
-			return
-		}
-		st.running = true
-		mu.Unlock()
-
-		s.listenWG.Add(1)
-		go func(k string) {
-			defer s.listenWG.Done()
-			defer func() {
-				mu.Lock()
-				state[k].running = false
-				mu.Unlock()
-			}()
-
-			const batch = 256
-			for {
-				if ctx.Err() != nil {
-					return
-				}
-				mu.Lock()
-				cursor := lastID[k]
-				mu.Unlock()
-
-				qctx, qcancel := context.WithTimeout(ctx, 10*time.Second)
-				rows, err := s.pool.Query(qctx, `
+	qctx, qcancel := context.WithTimeout(ctx, s.timeout)
+	rows, err := s.pool.Query(qctx, `
 SELECT id, key, etype, value
   FROM zestor_outbox
  WHERE ns_id=$1 AND kind=$2 AND id > $3
  ORDER BY id
- LIMIT $4`, s.ns, k, cursor, batch)
-				if err != nil {
-					qcancel()
-					if ctx.Err() != nil {
-						return
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(200 * time.Millisecond):
-					}
-					continue
-				}
-
-				// Collect the whole batch before publishing, so the pooled
-				// connection is released before we contend for the hub lock. A
-				// Watch snapshot holds that lock while querying, so publishing
-				// with a connection still checked out could deadlock the pool.
-				var (
-					evs     []*store.Event[T]
-					highest = cursor
-					iterErr error
-				)
-				for rows.Next() {
-					var id int64
-					var name, etype string
-					var val []byte
-					if err := rows.Scan(&id, &name, &etype, &val); err != nil {
-						iterErr = err
-						break
-					}
-					var obj T
-					if err := s.codec.Unmarshal(val, &obj); err != nil {
-						iterErr = fmt.Errorf("outbox row %d (%s/%s): %w", id, k, name, err)
-						break
-					}
-					evs = append(evs, &store.Event[T]{
-						Kind:      k,
-						Name:      name,
-						EventType: store.EventType(etype),
-						Object:    obj,
-					})
-					if id > highest {
-						highest = id
-					}
-				}
-				if iterErr == nil {
-					iterErr = rows.Err()
-				}
-				rows.Close()
-				qcancel()
-
-				if iterErr != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(200 * time.Millisecond):
-					}
-					continue
-				}
-
-				if len(evs) == 0 {
-					return
-				}
-
-				s.hub.Publish(k, evs...)
-				mu.Lock()
-				if highest > lastID[k] {
-					lastID[k] = highest
-				}
-				mu.Unlock()
-			}
-		}(kind)
+ LIMIT $4`, s.ns, kind, cursor, outboxBatch)
+	if err != nil {
+		qcancel()
+		return false, err
 	}
 
+	var (
+		evs     []*store.Event[T]
+		highest = cursor
+		iterErr error
+	)
+	for rows.Next() {
+		var id int64
+		var name, etype string
+		var val []byte
+		if err := rows.Scan(&id, &name, &etype, &val); err != nil {
+			iterErr = err
+			break
+		}
+		var obj T
+		if err := s.codec.Unmarshal(val, &obj); err != nil {
+			iterErr = fmt.Errorf("outbox row %d (%s/%s): %w", id, kind, name, err)
+			break
+		}
+		evs = append(evs, &store.Event[T]{
+			Kind:      kind,
+			Name:      name,
+			EventType: store.EventType(etype),
+			Object:    obj,
+		})
+		if id > highest {
+			highest = id
+		}
+	}
+	if iterErr == nil {
+		iterErr = rows.Err()
+	}
+	rows.Close()
+	qcancel()
+	if iterErr != nil {
+		return false, iterErr
+	}
+	if len(evs) == 0 {
+		return false, nil
+	}
+
+	emit(kind, evs...)
+
+	s.drainMu.Lock()
+	if cur, seen := s.lastID[kind]; !seen || highest > cur {
+		s.lastID[kind] = highest
+	}
+	s.drainMu.Unlock()
+	return true, nil
+}
+
+// catchUp drains kind to exhaustion. It is called from Watch's CatchUp hook with
+// the hub lock held, so emit is the hub's locked publish and the caller is
+// guaranteed that on return everything committed before the subscription has
+// already been handed to the subscribers that existed before it.
+func (s *storePG[T]) catchUp(ctx context.Context, kind string, emit watchhub.EmitFunc[T]) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		more, err := s.drainBatch(ctx, kind, emit)
+		if err != nil {
+			return err
+		}
+		if !more {
+			return nil
+		}
+	}
+}
+
+func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
+	s.drainMu.Lock()
+	st := s.draining[kind]
+	if st == nil {
+		st = &drainState{}
+		s.draining[kind] = st
+	}
+	if st.running {
+		st.pending = true
+		s.drainMu.Unlock()
+		return
+	}
+	st.running = true
+	s.drainMu.Unlock()
+
+	s.listenWG.Add(1)
+	go func() {
+		defer s.listenWG.Done()
+		for {
+			for ctx.Err() == nil {
+				more, err := s.drainBatch(ctx, kind, s.hub.Publish)
+				if err != nil {
+					select {
+					case <-ctx.Done():
+					case <-time.After(200 * time.Millisecond):
+					}
+					continue
+				}
+				if !more {
+					break
+				}
+			}
+
+			s.drainMu.Lock()
+			if st.pending && ctx.Err() == nil {
+				// A NOTIFY landed while we were draining; go round again rather
+				// than exiting and losing it.
+				st.pending = false
+				s.drainMu.Unlock()
+				continue
+			}
+			st.running = false
+			st.pending = false
+			s.drainMu.Unlock()
+			return
+		}
+	}()
+}
+
+func (s *storePG[T]) listenLoop(ctx context.Context) {
 	backoff := 200 * time.Millisecond
 	for ctx.Err() == nil {
 		s.mu.RLock()
@@ -861,7 +939,7 @@ SELECT id, key, etype, value
 				if ns != s.ns {
 					continue
 				}
-				triggerDrain(kind)
+				s.triggerDrain(ctx, kind)
 			}
 		}()
 		if exitLoop {
