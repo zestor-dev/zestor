@@ -12,12 +12,12 @@
 //	    })
 //	}
 //
-// TODO(FIX-PLAN): cases for T0.4 (phantom kinds), C4 (SetResult), C5 (SetMany
-// rename + no-op suppression in bulk writes) and C6 (Dumper) land with those
-// items. Everything below is the contract as of C1/C2/C3/W1.
+// A backend that implements store.Dumper is exercised for it too; one that does
+// not simply skips that case.
 package storetest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -89,7 +89,8 @@ func Run(t *testing.T, cfg Config) {
 		{"SetFnMissingKey", testSetFnMissingKey},
 		{"SetFnReportsChanged", testSetFnReportsChanged},
 		{"SetFnPropagatesError", testSetFnPropagatesError},
-		{"SetAllMergesIntoExisting", testSetAllMergesIntoExisting},
+		{"SetManyMergesIntoExisting", testSetManyMergesIntoExisting},
+		{"SetManySuppressesNoOps", testSetManySuppressesNoOps},
 		{"ListAppliesFilters", testListAppliesFilters},
 		{"ReadersAgree", testReadersAgree},
 		{"KindsAreIsolated", testKindsAreIsolated},
@@ -113,6 +114,9 @@ func Run(t *testing.T, cfg Config) {
 		{"CloseClosesWatchers", testCloseClosesWatchers},
 		{"CloseRejectsOperations", testCloseRejectsOperations},
 		{"CloseIsIdempotent", testCloseIsIdempotent},
+
+		// --- optional Dumper ---------------------------------------------
+		{"DumperWritesEveryKey", testDumperWritesEveryKey},
 
 		// --- optional capabilities ---------------------------------------
 		{"ValidationRejectsWrites", testValidationRejectsWrites},
@@ -231,20 +235,28 @@ func testSetCreatesThenUpdates(t *testing.T, cfg Config) {
 	s := newStore(t, cfg)
 	ctx := context.Background()
 
-	created, err := s.Set(ctx, "k", "a", Value{Name: "a", N: 1})
+	res, err := s.Set(ctx, "k", "a", Value{Name: "a", N: 1})
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if !created {
-		t.Error("first Set must report created=true")
+	if res != store.SetCreated {
+		t.Errorf("first Set reported %v, want created", res)
 	}
 
-	created, err = s.Set(ctx, "k", "a", Value{Name: "a", N: 2})
+	res, err = s.Set(ctx, "k", "a", Value{Name: "a", N: 2})
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if created {
-		t.Error("second Set must report created=false")
+	if res != store.SetUpdated {
+		t.Errorf("Set of a new value reported %v, want updated", res)
+	}
+
+	res, err = s.Set(ctx, "k", "a", Value{Name: "a", N: 2})
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if res != store.SetUnchanged {
+		t.Errorf("Set of an identical value reported %v, want unchanged", res)
 	}
 
 	got, ok, err := s.Get(ctx, "k", "a")
@@ -262,8 +274,12 @@ func testSetNoOpIsNotAChange(t *testing.T, cfg Config) {
 	mustSet(t, s, "k", "a", v)
 
 	ch := watchCtx(t, cfg, s, "k")
-	if _, err := s.Set(context.Background(), "k", "a", v); err != nil {
+	res, err := s.Set(context.Background(), "k", "a", v)
+	if err != nil {
 		t.Fatalf("Set: %v", err)
+	}
+	if res != store.SetUnchanged {
+		t.Errorf("Set of an identical value reported %v, want unchanged", res)
 	}
 	expectNoEvent(t, cfg, ch)
 }
@@ -359,16 +375,16 @@ func testSetFnPropagatesError(t *testing.T, cfg Config) {
 	}
 }
 
-func testSetAllMergesIntoExisting(t *testing.T, cfg Config) {
+func testSetManyMergesIntoExisting(t *testing.T, cfg Config) {
 	s := newStore(t, cfg)
 	ctx := context.Background()
 	mustSet(t, s, "k", "keep", Value{Name: "keep", N: 1})
 
-	if err := s.SetAll(ctx, "k", map[string]Value{
+	if err := s.SetMany(ctx, "k", map[string]Value{
 		"a": {Name: "a", N: 1},
 		"b": {Name: "b", N: 2},
 	}); err != nil {
-		t.Fatalf("SetAll: %v", err)
+		t.Fatalf("SetMany: %v", err)
 	}
 
 	n, err := s.Count(ctx, "k")
@@ -376,11 +392,49 @@ func testSetAllMergesIntoExisting(t *testing.T, cfg Config) {
 		t.Fatalf("Count: %v", err)
 	}
 	if n != 3 {
-		t.Errorf("Count=%d, want 3 — SetAll merges, it does not replace the kind", n)
+		t.Errorf("Count=%d, want 3 — SetMany merges, it does not replace the kind", n)
 	}
 	if _, ok, _ := s.Get(ctx, "k", "keep"); !ok {
-		t.Error("SetAll removed a key that was not in the supplied map")
+		t.Error("SetMany removed a key that was not in the supplied map")
 	}
+}
+
+// A bulk write must skip keys whose value is unchanged, exactly as a single Set
+// does. Re-importing identical data should be silent.
+func testSetManySuppressesNoOps(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	ctx := context.Background()
+	values := map[string]Value{
+		"a": {Name: "a", N: 1},
+		"b": {Name: "b", N: 2},
+		"c": {Name: "c", N: 3},
+	}
+	if err := s.SetMany(ctx, "k", values); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+
+	ch := watchCtx(t, cfg, s, "k")
+
+	// Same data again: nothing changed, so nothing may be emitted.
+	if err := s.SetMany(ctx, "k", values); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+	expectNoEvent(t, cfg, ch)
+
+	// One real change among unchanged keys: exactly one event.
+	changed := map[string]Value{
+		"a": {Name: "a", N: 1},
+		"b": {Name: "b", N: 99},
+		"c": {Name: "c", N: 3},
+	}
+	if err := s.SetMany(ctx, "k", changed); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+	ev := recv(t, cfg, ch)
+	if ev.Name != "b" || ev.EventType != store.EventTypeUpdate {
+		t.Errorf("got %s for %q, want an update for \"b\"", ev.EventType, ev.Name)
+	}
+	expectNoEvent(t, cfg, ch)
 }
 
 func testListAppliesFilters(t *testing.T, cfg Config) {
@@ -839,6 +893,39 @@ func testCloseIsIdempotent(t *testing.T, cfg Config) {
 // -----------------------------------------------------------------------------
 // optional capabilities
 // -----------------------------------------------------------------------------
+
+// Dump is optional: store.Dumper is asserted for, not required.
+func testDumperWritesEveryKey(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	ctx := context.Background()
+	d, ok := s.(store.Dumper)
+	if !ok {
+		t.Skip("backend does not implement store.Dumper")
+	}
+
+	for i := range 3 {
+		mustSet(t, s, "k", fmt.Sprintf("k%d", i), Value{Name: "v", N: i})
+	}
+
+	var buf bytes.Buffer
+	if err := d.Dump(ctx, &buf); err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+	for i := range 3 {
+		if key := fmt.Sprintf("k%d", i); !bytes.Contains(buf.Bytes(), []byte(key)) {
+			t.Errorf("Dump output omits %q:\n%s", key, buf.String())
+		}
+	}
+
+	// A failing writer must surface as an error, not be swallowed.
+	if err := d.Dump(ctx, errWriter{}); err == nil {
+		t.Error("Dump to a failing writer returned nil")
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
 
 func testValidationRejectsWrites(t *testing.T, cfg Config) {
 	if cfg.NewWithOptions == nil {

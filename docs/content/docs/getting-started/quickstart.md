@@ -113,21 +113,21 @@ All of these implementations share the same `store.Store[T]` interface, so the o
 Use `Set` to create or update values:
 
 ```go
-// Create a user (returns created=true)
-created, err := s.Set("users", "alice", User{
+// Create a user (returns store.SetCreated)
+res, err := s.Set(ctx, "users", "alice", User{
     Name:  "Alice",
     Email: "alice@example.com",
     Role:  "admin",
 })
-fmt.Println("Created:", created) // true
+fmt.Println("Set:", res) // created
 
-// Update the same user (returns created=false)
-created, err = s.Set("users", "alice", User{
+// Update the same user (returns store.SetUpdated)
+res, err = s.Set(ctx, "users", "alice", User{
     Name:  "Alice Smith",
     Email: "alice@example.com",
     Role:  "admin",
 })
-fmt.Println("Created:", created) // false (it was an update)
+fmt.Println("Set:", res) // updated  (writing the same value again gives: unchanged)
 ```
 
 ### Read
@@ -135,7 +135,7 @@ fmt.Println("Created:", created) // false (it was an update)
 Use `Get` to retrieve a single value:
 
 ```go
-user, ok, err := s.Get("users", "alice")
+user, ok, err := s.Get(ctx, "users", "alice")
 if ok {
     fmt.Printf("Found: %s (%s)\n", user.Name, user.Email)
 }
@@ -144,7 +144,7 @@ if ok {
 Use `List` to retrieve all values in a kind:
 
 ```go
-users, err := s.List("users")
+users, err := s.List(ctx, "users")
 for key, user := range users {
     fmt.Printf("%s: %s\n", key, user.Name)
 }
@@ -155,7 +155,7 @@ for key, user := range users {
 Use `Delete` to remove a value:
 
 ```go
-existed, previousUser, err := s.Delete("users", "alice")
+existed, previousUser, err := s.Delete(ctx, "users", "alice")
 if existed {
     fmt.Printf("Deleted: %s\n", previousUser.Name)
 }
@@ -167,11 +167,14 @@ One of Zestor's most powerful features is the ability to watch for changes:
 
 ```go
 // Start watching before making changes
-ch, cancel, err := s.Watch("users")
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, err := s.Watch(watchCtx, "users")
 if err != nil {
     log.Fatal(err)
 }
-defer cancel()
+defer stopWatching()
 
 // Process events in a goroutine
 go func() {
@@ -188,9 +191,9 @@ go func() {
 }()
 
 // These operations will trigger events
-s.Set("users", "bob", User{Name: "Bob", Email: "bob@example.com"})
-s.Set("users", "bob", User{Name: "Bob Smith", Email: "bob@example.com"})
-s.Delete("users", "bob")
+s.Set(ctx, "users", "bob", User{Name: "Bob", Email: "bob@example.com"})
+s.Set(ctx, "users", "bob", User{Name: "Bob Smith", Email: "bob@example.com"})
+s.Delete(ctx, "users", "bob")
 ```
 
 ### Watch Options
@@ -199,7 +202,7 @@ Filter events by type:
 
 ```go
 // Only watch for delete events
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithEventTypes[User](store.EventTypeDelete),
 )
 ```
@@ -208,7 +211,7 @@ Replay existing data on subscribe:
 
 ```go
 // Receive all existing items as Create events, then continue watching
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithInitialReplay[User](),
 )
 ```
@@ -217,7 +220,7 @@ Custom buffer size:
 
 ```go
 // Use a larger buffer for high-throughput scenarios
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithBufferSize[User](1024),
 )
 ```
@@ -228,12 +231,12 @@ Use filter functions to query data:
 
 ```go
 // Get only admin users
-admins, _ := s.List("users", func(key string, user User) bool {
+admins, _ := s.List(ctx, "users", func(key string, user User) bool {
     return user.Role == "admin"
 })
 
 // Combine multiple filters (AND logic)
-activeAdmins, _ := s.List("users",
+activeAdmins, _ := s.List(ctx, "users",
     func(key string, user User) bool { return user.Role == "admin" },
     func(key string, user User) bool { return user.Email != "" },
 )
@@ -262,8 +265,11 @@ func main() {
     defer s.Close()
 
     // Set up watcher
-    ch, cancel, _ := s.Watch("users", store.WithInitialReplay[User]())
-    defer cancel()
+    watchCtx, stopWatching := context.WithCancel(ctx)
+    defer stopWatching()
+
+    ch, _ := s.Watch(watchCtx, "users", store.WithInitialReplay[User]())
+    defer stopWatching()
 
     go func() {
         for event := range ch {
@@ -272,13 +278,13 @@ func main() {
     }()
 
     // Add some users
-    s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com"})
-    s.Set("users", "bob", User{Name: "Bob", Email: "bob@example.com"})
+    s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    s.Set(ctx, "users", "bob", User{Name: "Bob", Email: "bob@example.com"})
 
     time.Sleep(100 * time.Millisecond)
 
     // Query
-    count, _ := s.Count("users")
+    count, _ := s.Count(ctx, "users")
     fmt.Printf("\nTotal users: %d\n", count)
 }
 ```

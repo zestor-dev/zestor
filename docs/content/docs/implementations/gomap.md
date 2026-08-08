@@ -39,9 +39,9 @@ func main() {
     defer s.Close()
 
     // CRUD operations
-    s.Set("users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
     
-    user, ok, _ := s.Get("users", "alice")
+    user, ok, _ := s.Get(ctx, "users", "alice")
     if ok {
         fmt.Println(user.Name) // Alice
     }
@@ -73,7 +73,7 @@ s := gomap.NewMemStore[User](store.StoreOptions[User]{
 })
 
 // This will fail validation
-_, err := s.Set("users", "bob", User{Name: "Bob"})
+_, err := s.Set(ctx, "users", "bob", User{Name: "Bob"})
 // err: "email required"
 ```
 
@@ -96,7 +96,10 @@ s := gomap.NewMemStore[User](store.StoreOptions[User]{
 Real-time notifications for data changes:
 
 ```go
-ch, cancel, _ := s.Watch("users",
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, _ := s.Watch(watchCtx, "users",
     store.WithInitialReplay[User](),    // Replay existing data
     store.WithEventTypes[User](         // Filter event types
         store.EventTypeCreate,
@@ -104,7 +107,7 @@ ch, cancel, _ := s.Watch("users",
     ),
     store.WithBufferSize[User](256),    // Channel buffer size
 )
-defer cancel()
+defer stopWatching()
 
 for event := range ch {
     switch event.EventType {
@@ -133,7 +136,7 @@ for event := range ch {
 
 All operations are protected by `sync.RWMutex`:
 - **Read operations** (Get, List, Count, Keys, Values): Use read lock (concurrent)
-- **Write operations** (Set, Delete, SetFn, SetAll): Use write lock (exclusive)
+- **Write operations** (Set, Delete, SetFn, SetMany): Use write lock (exclusive)
 
 ```go
 // Safe to call from multiple goroutines
@@ -142,7 +145,7 @@ for i := 0; i < 100; i++ {
     wg.Add(1)
     go func(n int) {
         defer wg.Done()
-        s.Set("items", fmt.Sprintf("item-%d", n), Item{ID: n})
+        s.Set(ctx, "items", fmt.Sprintf("item-%d", n), Item{ID: n})
     }(i)
 }
 wg.Wait()
@@ -193,8 +196,11 @@ func main() {
     defer s.Close()
 
     // Watch for changes
-    ch, cancel, _ := s.Watch("tasks", store.WithInitialReplay[Task]())
-    defer cancel()
+    watchCtx, stopWatching := context.WithCancel(ctx)
+    defer stopWatching()
+
+    ch, _ := s.Watch(watchCtx, "tasks", store.WithInitialReplay[Task]())
+    defer stopWatching()
 
     go func() {
         for ev := range ch {
@@ -203,17 +209,17 @@ func main() {
     }()
 
     // Add tasks
-    s.Set("tasks", "task-1", Task{Title: "Buy groceries"})
-    s.Set("tasks", "task-2", Task{Title: "Write docs"})
+    s.Set(ctx, "tasks", "task-1", Task{Title: "Buy groceries"})
+    s.Set(ctx, "tasks", "task-2", Task{Title: "Write docs"})
 
     // Update task
-    s.SetFn("tasks", "task-1", func(t Task) (Task, error) {
+    s.SetFn(ctx, "tasks", "task-1", func(t Task) (Task, error) {
         t.Completed = true
         return t, nil
     })
 
     // List incomplete
-    tasks, _ := s.List("tasks", func(k string, t Task) bool {
+    tasks, _ := s.List(ctx, "tasks", func(k string, t Task) bool {
         return !t.Completed
     })
     fmt.Printf("\nIncomplete: %d\n", len(tasks))

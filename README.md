@@ -60,9 +60,9 @@ func main() {
     s := gomap.NewMemStore[User](store.StoreOptions[User]{})
     defer s.Close()
 
-    // Set a value
-    created, _ := s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
-    fmt.Println("Created:", created) // true
+    // Set reports what it actually did: created, updated, or unchanged
+    res, _ := s.Set(ctx, "users", "alice", User{Name: "Alice", Email: "alice@example.com"})
+    fmt.Println("Set:", res) // created
 
     // Get a value
     user, ok, _ := s.Get(ctx, "users", "alice")
@@ -165,8 +165,8 @@ All methods take a `context.Context` as their first argument.
 
 | Method | Description |
 |--------|-------------|
-| `Set(ctx, kind, key, value)` | Create or update a value |
-| `SetAll(ctx, kind, values)` | Bulk set multiple values (merges; does not remove absent keys) |
+| `Set(ctx, kind, key, value)` | Write a value; returns `SetCreated` / `SetUpdated` / `SetUnchanged` |
+| `SetMany(ctx, kind, values)` | Bulk write (merges; leaves absent keys alone, skips unchanged ones) |
 | `SetFn(ctx, kind, key, fn)` | Atomically update a value using a transform function |
 | `Delete(ctx, kind, key)` | Delete a value |
 
@@ -181,5 +181,13 @@ All methods take a `context.Context` as their first argument.
 | Method | Description |
 |--------|-------------|
 | `Close()` | Close the store and all watchers |
-| `Dump()` | Debug dump of all data |
+
+`Dump` is not part of `Store`. Backends that support it implement the optional
+`store.Dumper` interface:
+
+```go
+if d, ok := s.(store.Dumper); ok {
+    _ = d.Dump(ctx, os.Stdout)
+}
+```
 

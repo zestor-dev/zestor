@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -104,8 +105,12 @@ func TestDumpIncludesVersion(t *testing.T) {
 	if _, err := s.Set(ctx, "notes", "a", Note{Title: "v2"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Dump(); !strings.Contains(got, "notes/a v2") {
-		t.Errorf("Dump() = %q, want it to report version 2", got)
+	var buf bytes.Buffer
+	if err := s.(store.Dumper).Dump(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "notes/a v2") {
+		t.Errorf("Dump() = %q, want it to report version 2", buf.String())
 	}
 }
 
@@ -144,11 +149,11 @@ func TestFailedWriteRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Budget exactly one marshal so SetAll fails on its second key.
+	// Budget exactly one marshal so SetMany fails on its second key.
 	c.budget.Store(1)
-	err = s.SetAll(ctx, "notes", map[string]Note{"a": {Title: "a"}, "b": {Title: "b"}})
+	err = s.SetMany(ctx, "notes", map[string]Note{"a": {Title: "a"}, "b": {Title: "b"}})
 	if err == nil {
-		t.Fatal("SetAll with a failing codec must return an error")
+		t.Fatal("SetMany with a failing codec must return an error")
 	}
 
 	c.budget.Store(1000)
@@ -160,10 +165,10 @@ func TestFailedWriteRollsBack(t *testing.T) {
 	select {
 	case e := <-done:
 		if e != nil {
-			t.Fatalf("a write after a failed SetAll errored (%v) — the failed transaction was not rolled back", e)
+			t.Fatalf("a write after a failed SetMany errored (%v) — the failed transaction was not rolled back", e)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("a write after a failed SetAll hung — the failed transaction still holds the write lock")
+		t.Fatal("a write after a failed SetMany hung — the failed transaction still holds the write lock")
 	}
 
 	n, err := s.Count(ctx, "notes")
@@ -171,7 +176,7 @@ func TestFailedWriteRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n != 2 {
-		t.Errorf("Count=%d after a rolled-back SetAll, want 2 (seed + after) — the failed batch was partially committed", n)
+		t.Errorf("Count=%d after a rolled-back SetMany, want 2 (seed + after) — the failed batch was partially committed", n)
 	}
 }
 
@@ -187,7 +192,7 @@ func TestWatchReplayCancelRace(t *testing.T) {
 	for i := range 200 {
 		vals[string(rune('a'+i%26))+string(rune('a'+i/26))] = Note{Title: "n", N: i}
 	}
-	if err := s.SetAll(ctx, "notes", vals); err != nil {
+	if err := s.SetMany(ctx, "notes", vals); err != nil {
 		t.Fatal(err)
 	}
 

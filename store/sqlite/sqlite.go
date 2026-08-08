@@ -1,14 +1,15 @@
 package sqlite
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -251,14 +252,14 @@ func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyVa
 	return out, rows.Err()
 }
 
-func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (bool, error) {
+func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
 	if err := s.guard(ctx); err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 
 	s.writeMu.Lock()
@@ -266,7 +267,7 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (bo
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	// Rollback is driven by an explicit flag rather than by inspecting a named
 	// error: every `if err := ...` below shadows the outer err, so anything that
@@ -282,42 +283,43 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (bo
 	// Try INSERT; on conflict the row exists and we decide whether to update.
 	res, err := tx.ExecContext(ctx, setQuery, kind, key, enc)
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	inserted, err := res.RowsAffected()
 	if err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
-	created := inserted > 0
+	result := store.SetCreated
 
-	if !created {
+	if inserted == 0 {
 		var cur []byte
 		if err := tx.QueryRowContext(ctx, getQuery, kind, key).Scan(&cur); err != nil {
-			return false, err
+			return store.SetUnchanged, err
 		}
 		if bytes.Equal(cur, enc) {
 			if err := tx.Commit(); err != nil {
-				return false, err
+				return store.SetUnchanged, err
 			}
 			committed = true
-			return false, nil
+			return store.SetUnchanged, nil
 		}
 		if _, err := tx.ExecContext(ctx, updateQuery, enc, kind, key); err != nil {
-			return false, err
+			return store.SetUnchanged, err
 		}
+		result = store.SetUpdated
 	}
 
 	if err := tx.Commit(); err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	committed = true
 
-	etype := store.EventTypeUpdate
-	if created {
-		etype = store.EventTypeCreate
+	etype := store.EventTypeCreate
+	if result == store.SetUpdated {
+		etype = store.EventTypeUpdate
 	}
 	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: etype, Object: value})
-	return created, nil
+	return result, nil
 }
 
 func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
@@ -379,7 +381,7 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 	return true, nil
 }
 
-func (s *sqLiteStore[T]) SetAll(ctx context.Context, kind string, values map[string]T) error {
+func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	if err := s.guard(ctx); err != nil {
 		return err
 	}
@@ -398,7 +400,9 @@ func (s *sqLiteStore[T]) SetAll(ctx context.Context, kind string, values map[str
 		}
 	}()
 
-	existingKeys, err := existingKeysTx(ctx, tx, kind)
+	// The existing encoded values, not just the key set: a key whose bytes are
+	// unchanged must be skipped entirely, the way a single Set skips it.
+	existing, err := existingRowsTx(ctx, tx, kind)
 	if err != nil {
 		return err
 	}
@@ -407,14 +411,8 @@ func (s *sqLiteStore[T]) SetAll(ctx context.Context, kind string, values map[str
 INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?)
 ON CONFLICT(kind,key) DO UPDATE SET
   value      = excluded.value,
-  version    = CASE WHEN zestor_kv.value != excluded.value
-                    THEN zestor_kv.version + 1
-                    ELSE zestor_kv.version
-               END,
-  updated_at = CASE WHEN zestor_kv.value != excluded.value
-                    THEN STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
-                    ELSE zestor_kv.updated_at
-               END;
+  version    = zestor_kv.version + 1,
+  updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now');
 `)
 	if err != nil {
 		return err
@@ -429,11 +427,15 @@ ON CONFLICT(kind,key) DO UPDATE SET
 		if err != nil {
 			return err
 		}
+		prev, existed := existing[k]
+		if existed && bytes.Equal(prev, enc) {
+			continue
+		}
 		if _, err := stmtIns.ExecContext(ctx, kind, k, enc); err != nil {
 			return err
 		}
 		etype := store.EventTypeCreate
-		if _, existed := existingKeys[k]; existed {
+		if existed {
 			etype = store.EventTypeUpdate
 		}
 		evs = append(evs, &store.Event[T]{Kind: kind, Name: k, EventType: etype, Object: v})
@@ -448,22 +450,25 @@ ON CONFLICT(kind,key) DO UPDATE SET
 	return nil
 }
 
-// existingKeysTx reads and fully drains the key set, so the rows are closed
-// before the caller issues further statements on the same transaction.
-func existingKeysTx(ctx context.Context, tx *sql.Tx, kind string) (map[string]struct{}, error) {
-	rows, err := tx.QueryContext(ctx, keysQuery, kind)
+// existingRowsTx reads and fully drains the kind's encoded values, so the rows
+// are closed before the caller issues further statements on the same
+// transaction. It holds one kind in memory, which is the same order of data a
+// bulk write already carries.
+func existingRowsTx(ctx context.Context, tx *sql.Tx, kind string) (map[string][]byte, error) {
+	rows, err := tx.QueryContext(ctx, listQuery, kind)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make(map[string]struct{})
+	out := make(map[string][]byte)
 	for rows.Next() {
 		var k string
-		if err := rows.Scan(&k); err != nil {
+		var v []byte
+		if err := rows.Scan(&k, &v); err != nil {
 			return nil, err
 		}
-		out[k] = struct{}{}
+		out[k] = v
 	}
 	return out, rows.Err()
 }
@@ -577,22 +582,36 @@ func (s *sqLiteStore[T]) Close() error {
 	return s.db.Close()
 }
 
-func (s *sqLiteStore[T]) Dump() string {
-	var sb strings.Builder
-	rows, err := s.db.Query(`SELECT kind, key, value, version, updated_at FROM zestor_kv ORDER BY kind, key;`)
+// Dump implements store.Dumper.
+func (s *sqLiteStore[T]) Dump(ctx context.Context, w io.Writer) error {
+	if err := s.guard(ctx); err != nil {
+		return err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT kind, key, value, version, updated_at FROM zestor_kv ORDER BY kind, key;`)
 	if err != nil {
-		return err.Error()
+		return err
 	}
 	defer rows.Close()
+
+	bw := bufio.NewWriter(w)
 	for rows.Next() {
 		var kind, key, updated string
 		var value []byte
 		var ver int
-		if err := rows.Scan(&kind, &key, &value, &ver, &updated); err == nil {
-			fmt.Fprintf(&sb, "%s/%s v%d (%dB) %s | value=%s\n", kind, key, ver, len(value), updated, string(value))
+		if err := rows.Scan(&kind, &key, &value, &ver, &updated); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=%s\n",
+			kind, key, ver, len(value), updated, value); err != nil {
+			return err
 		}
 	}
-	return sb.String()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return bw.Flush()
 }
 
 func (s *sqLiteStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, error) {

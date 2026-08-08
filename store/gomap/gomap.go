@@ -1,11 +1,12 @@
 package gomap
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/zestor-dev/zestor/store"
@@ -138,41 +139,41 @@ func (s *memStore[T]) Count(ctx context.Context, kind string) (int, error) {
 	return len(s.kinds[kind]), nil
 }
 
-func (s *memStore[T]) Set(ctx context.Context, kind, key string, value T) (bool, error) {
+func (s *memStore[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return store.SetUnchanged, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return false, store.ErrClosed
+		return store.SetUnchanged, store.ErrClosed
 	}
 	s.ensureKind(kind)
 
 	if fn, ok := s.validationFns[kind]; ok {
 		if err := fn(value); err != nil {
-			return false, err
+			return store.SetUnchanged, err
 		}
 	}
 
 	prev, existed := s.kinds[kind][key]
 	if existed && s.compareFn(prev, value) {
-		return false, nil
+		return store.SetUnchanged, nil
 	}
 	s.kinds[kind][key] = value
 
-	evType := store.EventTypeUpdate
-	if !existed {
-		evType = store.EventTypeCreate
+	result, evType := store.SetCreated, store.EventTypeCreate
+	if existed {
+		result, evType = store.SetUpdated, store.EventTypeUpdate
 	}
 	// Published under mu: two concurrent Sets to the same key enqueue in the
 	// same order they were applied, so a watcher rebuilding state converges on
 	// the value the store actually holds.
 	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: evType, Object: value})
-	return !existed, nil
+	return result, nil
 }
 
-func (s *memStore[T]) SetAll(ctx context.Context, kind string, values map[string]T) error {
+func (s *memStore[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -323,19 +324,30 @@ func (s *memStore[T]) Close() error {
 	return nil
 }
 
-func (s *memStore[T]) Dump() string {
+// Dump implements store.Dumper.
+func (s *memStore[T]) Dump(ctx context.Context, w io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.closed {
+		return store.ErrClosed
+	}
 
-	sb := strings.Builder{}
+	bw := bufio.NewWriter(w)
 	for _, kind := range slices.Sorted(maps.Keys(s.kinds)) {
-		sb.WriteString(fmt.Sprintf("%s:\n", kind))
+		if _, err := fmt.Fprintf(bw, "%s:\n", kind); err != nil {
+			return err
+		}
 		m := s.kinds[kind]
 		for _, k := range slices.Sorted(maps.Keys(m)) {
-			sb.WriteString(fmt.Sprintf("  %s: %+v\n", k, m[k]))
+			if _, err := fmt.Fprintf(bw, "  %s: %+v\n", k, m[k]); err != nil {
+				return err
+			}
 		}
 	}
-	return sb.String()
+	return bw.Flush()
 }
 
 // GetAll returns a copy of the kind and key maps. The values themselves are

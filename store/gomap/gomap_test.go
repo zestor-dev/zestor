@@ -1,6 +1,7 @@
 package gomap_test
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -114,8 +115,12 @@ func TestDumpIsSorted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := s.Dump()
-	if want := "kind:\n  a: "; !strings.HasPrefix(got, want) {
-		t.Errorf("Dump() = %q, want it to start with %q", got, want)
+
+	var buf bytes.Buffer
+	if err := s.(store.Dumper).Dump(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if want := "kind:\n  a: "; !strings.HasPrefix(buf.String(), want) {
+		t.Errorf("Dump() = %q, want it to start with %q", buf.String(), want)
 	}
 }

@@ -16,7 +16,6 @@ type Store[T any] interface {
     Writer[T]
     Watcher[T]
     Close() error
-    Dump() string
 }
 ```
 
@@ -31,16 +30,16 @@ Data in Zestor is organized by **kinds**. Think of kinds like tables in a databa
 s := gomap.NewMemStore[any](store.StoreOptions[any]{})
 
 // "users" kind
-s.Set("users", "alice", User{Name: "Alice"})
-s.Set("users", "bob", User{Name: "Bob"})
+s.Set(ctx, "users", "alice", User{Name: "Alice"})
+s.Set(ctx, "users", "bob", User{Name: "Bob"})
 
 // "products" kind  
-s.Set("products", "laptop", Product{Name: "Laptop", Price: 999})
-s.Set("products", "phone", Product{Name: "Phone", Price: 699})
+s.Set(ctx, "products", "laptop", Product{Name: "Laptop", Price: 999})
+s.Set(ctx, "products", "phone", Product{Name: "Phone", Price: 699})
 
 // Query by kind
-users, _ := s.List("users")     // Only users
-products, _ := s.List("products") // Only products
+users, _ := s.List(ctx, "users")     // Only users
+products, _ := s.List(ctx, "products") // Only products
 ```
 
 ### When to Use Multiple Kinds
@@ -63,8 +62,8 @@ productStore := gomap.NewMemStore[Product](opts)
 ```go
 // Single store with interface{} or any
 store := gomap.NewMemStore[any](opts)
-store.Set("users", "alice", User{Name: "Alice"})
-store.Set("config", "timeout", 30)
+store.Set(ctx, "users", "alice", User{Name: "Alice"})
+store.Set(ctx, "config", "timeout", 30)
 ```
 
 ## Keys
@@ -73,10 +72,10 @@ Within each kind, data is stored by **string keys**. Keys must be unique within 
 
 ```go
 // Key "alice" in kind "users"
-s.Set("users", "alice", User{Name: "Alice"})
+s.Set(ctx, "users", "alice", User{Name: "Alice"})
 
 // Same key "alice" in kind "admins" — no conflict
-s.Set("admins", "alice", User{Name: "Alice Admin"})
+s.Set(ctx, "admins", "alice", User{Name: "Alice Admin"})
 ```
 
 ## Store Options
@@ -151,12 +150,12 @@ for i := 0; i < 100; i++ {
     wg.Add(1)
     go func(n int) {
         defer wg.Done()
-        s.Set("counters", fmt.Sprintf("counter-%d", n), n)
+        s.Set(ctx, "counters", fmt.Sprintf("counter-%d", n), n)
     }(i)
 }
 wg.Wait()
 
-count, _ := s.Count("counters")
+count, _ := s.Count(ctx, "counters")
 fmt.Println(count) // 100
 ```
 

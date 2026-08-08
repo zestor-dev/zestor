@@ -13,12 +13,14 @@ Zestor's watch system lets you subscribe to changes in real-time. When data is c
 ## Basic Watching
 
 ```go
-// Start watching the "users" kind
-ch, cancel, err := s.Watch("users")
+// The watch lives until this context is cancelled.
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, err := s.Watch(watchCtx, "users")
 if err != nil {
     log.Fatal(err)
-}
-defer cancel() // Always cancel when done
+} // cancelling the context is how you unsubscribe
 
 // Process events
 for event := range ch {
@@ -68,12 +70,15 @@ Only receive specific event types:
 
 ```go
 // Only delete events
-ch, cancel, _ := s.Watch("users",
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, _ := s.Watch(watchCtx, "users",
     store.WithEventTypes[User](store.EventTypeDelete),
 )
 
 // Create and update only (no deletes)
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithEventTypes[User](
         store.EventTypeCreate,
         store.EventTypeUpdate,
@@ -87,7 +92,7 @@ Receive existing data as `Create` events when subscribing:
 
 ```go
 // First receive all existing users, then continue watching
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithInitialReplay[User](),
 )
 ```
@@ -103,46 +108,55 @@ Configure the channel buffer size:
 
 ```go
 // Larger buffer for high-throughput scenarios
-ch, cancel, _ := s.Watch("users",
+ch, _ := s.Watch(watchCtx, "users",
     store.WithBufferSize[User](1024),
 )
 ```
 
-Default buffer size is 128. If the buffer fills up (slow consumer), events are **dropped** (non-blocking sends).
+Default is 128. `BufferSize` sets how far the consumer may fall behind before the watch overflows and is terminated with `ErrWatchOverflow` — see [No silent gaps](#no-silent-gaps).
 
 ### Combining Options
 
 Options can be combined:
 
 ```go
-ch, cancel, _ := s.Watch("users",
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch, _ := s.Watch(watchCtx, "users",
     store.WithInitialReplay[User](),
     store.WithEventTypes[User](store.EventTypeCreate, store.EventTypeDelete),
     store.WithBufferSize[User](256),
 )
 ```
 
-## Cancel Function
+## Unsubscribing
 
-The `cancel` function returned by `Watch` must be called when you're done watching:
+`Watch` does not return a cancel function. The watch lives until the context you
+passed it is cancelled — that is the only way to unsubscribe, and it means a
+watch cannot outlive the scope that owns it by accident.
 
 ```go
-ch, cancel, _ := s.Watch("users")
+watchCtx, stopWatching := context.WithCancel(ctx)
 
-// Option 1: defer
-defer cancel()
+// Option 1: tied to the enclosing scope
+defer stopWatching()
 
-// Option 2: explicit cancel
+// Option 2: tied to a signal
 go func() {
-    <-stopSignal
-    cancel()
+    <-shutdown
+    stopWatching()
 }()
 ```
 
-Calling `cancel()`:
-- Closes the event channel
-- Removes the watcher from the store
-- Is safe to call multiple times
+Cancelling the context:
+
+- closes the event channel, so a `range` over it terminates
+- removes the watcher from the store
+- is safe to do more than once, and safe to do concurrently with a write
+
+Because the channel is closed exactly once, by the goroutine that owns it, a
+consumer can always `range` over it without a separate done channel.
 
 ## Multiple Watchers
 
@@ -150,7 +164,10 @@ You can have multiple watchers on the same kind:
 
 ```go
 // Watcher 1: Log all events
-ch1, cancel1, _ := s.Watch("users")
+watchCtx, stopWatching := context.WithCancel(ctx)
+defer stopWatching()
+
+ch1, _ := s.Watch(watchCtx, "users")
 go func() {
     for event := range ch1 {
         log.Printf("Event: %s %s", event.EventType, event.Name)
@@ -158,7 +175,7 @@ go func() {
 }()
 
 // Watcher 2: Only track deletes
-ch2, cancel2, _ := s.Watch("users",
+ch2, _ := s.Watch(watchCtx, "users",
     store.WithEventTypes[User](store.EventTypeDelete),
 )
 go func() {
@@ -170,32 +187,66 @@ go func() {
 
 ## Event Delivery Guarantees
 
-### Non-Blocking Sends
+Every backend gives you the same four guarantees.
 
-Events are sent with non-blocking channel sends:
+### Ordering
+
+Events for a kind arrive in the order the writes were applied. A consumer that
+applies events in receive order converges on the state the store actually holds,
+even when several goroutines write the same key concurrently.
+
+### Replay precedes live
+
+With `WithInitialReplay`, every replayed event is delivered before any event for
+a write that happened after the `Watch` call. The snapshot is taken atomically
+with the subscription, so a stale replayed value can never overwrite a newer one
+you already received.
+
+### No silent gaps
+
+If your consumer falls roughly `BufferSize` events behind, the watch is
+**terminated rather than degraded**: you receive a final event with
+`EventType` `EventTypeError` and `Err` set to `store.ErrWatchOverflow`, and then
+the channel closes.
 
 ```go
-select {
-case wch.ch <- ev:
-    // delivered
-default:
-    // dropped (buffer full)
+for event := range ch {
+    if event.Err != nil {
+        // Our view is now incomplete. Rebuild it.
+        return resync()
+    }
+    apply(event)
 }
 ```
 
-If your consumer is slow and the buffer fills up, **events will be dropped**. To avoid this:
-- Increase buffer size for bursty workloads
-- Ensure your event handler is fast
-- Offload heavy processing to a worker pool
+This is the one case worth designing for. A store that silently dropped events
+would leave your replica quietly wrong forever; instead you are told, and the
+correct response is to re-`List` and re-`Watch`.
 
-### No Duplicate Suppression Within Watch
+Event type filters never suppress the terminal event — a consumer that filtered
+it away could not learn that its view had become incomplete.
 
-If you call `Set` with the same value, and the store's `CompareFn` returns `true` (values are equal), **no event is emitted**. This prevents unnecessary notifications.
+To avoid overflowing in the first place:
+
+- raise `BufferSize` for bursty workloads
+- keep the handler fast, and offload heavy work to a worker pool
+
+### Exactly-once close
+
+The channel is closed exactly once — when the context is cancelled, when the
+watch overflows, or when the store is closed.
+
+### No-op writes emit nothing
+
+If you `Set` a value equal to what is already stored (per the store's
+`CompareFn`, where supported), nothing is written and no event is emitted.
+`SetMany` skips unchanged keys the same way, so re-importing identical data is
+silent.
 
 ```go
-s.Set("users", "alice", User{Name: "Alice"}) // Create event
-s.Set("users", "alice", User{Name: "Alice"}) // No event (same value)
-s.Set("users", "alice", User{Name: "Alice!"}) // Update event
+s.Set(ctx, "users", "alice", User{Name: "Alice"})  // create event
+s.Set(ctx, "users", "alice", User{Name: "Alice"})  // no event, returns SetUnchanged
+s.Set(ctx, "users", "alice", User{Name: "Alice!"}) // update event
 ```
 
 ## Patterns
@@ -203,24 +254,29 @@ s.Set("users", "alice", User{Name: "Alice!"}) // Update event
 ### Watch + Initial State
 
 ```go
-func syncUsers(s store.Store[User]) map[string]User {
+// mirror keeps a local replica of a kind until ctx is cancelled. It returns an
+// error if the watch overflowed, because at that point the replica is incomplete
+// and the caller has to start again.
+func mirror(ctx context.Context, s store.Store[User], apply func(map[string]User)) error {
+    ch, err := s.Watch(ctx, "users", store.WithInitialReplay[User]())
+    if err != nil {
+        return err
+    }
+
     state := make(map[string]User)
-    
-    ch, cancel, _ := s.Watch("users",
-        store.WithInitialReplay[User](),
-    )
-    defer cancel()
-    
     for event := range ch {
+        if event.Err != nil {
+            return event.Err // ErrWatchOverflow: re-list and re-watch
+        }
         switch event.EventType {
         case store.EventTypeCreate, store.EventTypeUpdate:
             state[event.Name] = event.Object
         case store.EventTypeDelete:
             delete(state, event.Name)
         }
+        apply(state)
     }
-    
-    return state
+    return ctx.Err() // the channel closed because ctx was cancelled
 }
 ```
 
@@ -229,6 +285,10 @@ func syncUsers(s store.Store[User]) map[string]User {
 ```go
 func fanOut[T any](ch <-chan *store.Event[T], handlers ...func(*store.Event[T])) {
     for event := range ch {
+        if event.Err != nil {
+            log.Printf("watch ended: %v", event.Err)
+            return
+        }
         for _, handler := range handlers {
             handler(event)
         }
@@ -236,7 +296,7 @@ func fanOut[T any](ch <-chan *store.Event[T], handlers ...func(*store.Event[T]))
 }
 
 // Usage
-ch, cancel, _ := s.Watch("users")
+ch, _ := s.Watch(watchCtx, "users")
 go fanOut(ch,
     logEvent,
     updateMetrics,

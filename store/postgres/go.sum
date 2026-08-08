@@ -25,6 +25,10 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
+github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512 h1:MuexbngFLOQMCnDJSfSWPxEICmUpX3ANb3Zju30kN8E=
+github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512/go.mod h1:ZzA+ycqOEfVVQ1e62Fs0G15zXfEI0WA9eAZhKshCs7w=
+github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512 h1:ATH1BPS5wZXeJuYXlqDsWazygOCovCZE81cM5n6aSBk=
+github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512/go.mod h1:tvsCi/SGFqxq+33+lQFpFC7C13er9QpVEMf1xi+1G2w=
 go.yaml.in/yaml/v2 v2.4.3 h1:6gvOSjQoTB3vt1l+CU+tSyi/HOjfOjRLJ4YwYZGwRO0=
 go.yaml.in/yaml/v2 v2.4.3/go.mod h1:zSxWcmIDjOzPXpjlTTbAsKokqkDNAVtZO0WOMiT90s8=
 golang.org/x/crypto v0.37.0 h1:kJNSjF/Xp7kU0iB2Z+9viTPMW4EqqsrywMXLJOOsXSE=

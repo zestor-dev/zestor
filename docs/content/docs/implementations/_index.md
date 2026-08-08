@@ -45,7 +45,7 @@ All implementations satisfy `store.Store[T]`:
 ```go
 // Works with any implementation
 func processUsers(s store.Store[User]) error {
-    users, err := s.List("users")
+    users, err := s.List(ctx, "users")
     // ...
 }
 

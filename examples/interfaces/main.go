@@ -107,16 +107,19 @@ func watchForNewUsers(ctx context.Context, w store.Watcher[User], ready chan<- s
 	}
 	close(ready)
 
-	for ev := range ch {
+	// One event is enough for this example; a real consumer would range over ch.
+	ev, ok := <-ch
+	if !ok {
+		fmt.Println("Watch ended: channel closed")
+		return
+	}
+	if ev.Err != nil {
 		// A watcher that falls behind is told so rather than silently losing
 		// events: the channel closes right after this event.
-		if ev.Err != nil {
-			fmt.Println("Watch ended:", ev.Err, "- re-list and re-watch to resync")
-			return
-		}
-		fmt.Printf("New user created: %s (%s)\n", ev.Name, ev.Object.Name)
-		return // only process one event for this example
+		fmt.Println("Watch ended:", ev.Err, "- re-list and re-watch to resync")
+		return
 	}
+	fmt.Printf("New user created: %s (%s)\n", ev.Name, ev.Object.Name)
 
 	// w.Get(...) ← Would be a compile error! Watcher has no Get method
 	// w.Set(...) ← Would be a compile error! Watcher has no Set method

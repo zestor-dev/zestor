@@ -2,13 +2,9 @@ module github.com/zestor-dev/zestor/store/sqlite
 
 go 1.25
 
-replace github.com/zestor-dev/zestor/codec => ../../codec
-
-replace github.com/zestor-dev/zestor => ../..
-
 require (
-	github.com/zestor-dev/zestor v0.0.0-00010101000000-000000000000
-	github.com/zestor-dev/zestor/codec v0.0.0-00010101000000-000000000000
+	github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512
+	github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512
 	modernc.org/sqlite v1.39.1
 )
 
