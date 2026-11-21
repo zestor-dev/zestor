@@ -103,6 +103,7 @@ func Run(t *testing.T, cfg Config) {
 		{"WatchDeliversAllEventTypes", testWatchDeliversAllEventTypes},
 		{"WatchFiltersEventTypes", testWatchFiltersEventTypes},
 		{"WatchInitialReplay", testWatchInitialReplay},
+		{"WatchReplayLargerThanBuffer", testWatchReplayLargerThanBuffer},
 		{"WatchReplayPrecedesLive", testWatchReplayPrecedesLive},
 		{"WatchPreservesWriteOrder", testWatchPreservesWriteOrder},
 		{"WatchOverflowIsSignalled", testWatchOverflowIsSignalled},
@@ -628,6 +629,54 @@ func testWatchInitialReplay(t *testing.T, cfg Config) {
 		if !seen[fmt.Sprintf("k%d", i)] {
 			t.Errorf("initial replay omitted k%d", i)
 		}
+	}
+}
+
+// testWatchReplayLargerThanBuffer: BufferSize bounds how far a consumer may lag
+// behind live writes. The initial replay is not lag — a snapshot larger than
+// the buffer must be delivered in full to a consumer that is reading, and the
+// watch must stay live afterwards.
+func testWatchReplayLargerThanBuffer(t *testing.T, cfg Config) {
+	const n = 2 * store.DefaultWatchBufferSize
+	values := make(map[string]Value, n)
+	for i := range n {
+		values[fmt.Sprintf("k%04d", i)] = Value{Name: "v", N: i}
+	}
+
+	for _, tc := range []struct {
+		name string
+		opts []store.WatchOption[Value]
+	}{
+		{"DefaultBuffer", nil},
+		{"SmallBuffer", []store.WatchOption[Value]{store.WithBufferSize[Value](4)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t, cfg)
+			if err := s.SetMany(context.Background(), "k", values); err != nil {
+				t.Fatalf("SetMany: %v", err)
+			}
+			opts := append([]store.WatchOption[Value]{store.WithInitialReplay[Value]()}, tc.opts...)
+			ch := watchCtx(t, cfg, s, "k", opts...)
+
+			seen := make(map[string]bool, n)
+			for i := range n {
+				ev := recv(t, cfg, ch)
+				if ev.Err != nil {
+					t.Fatalf("replay of %d keys terminated after %d events: %v", n, i, ev.Err)
+				}
+				seen[ev.Name] = true
+			}
+			if len(seen) != n {
+				t.Errorf("replay delivered %d distinct keys, want %d", len(seen), n)
+			}
+
+			const key = "live"
+			mustSet(t, s, "k", key, Value{Name: "live"})
+			if ev := recv(t, cfg, ch); ev.Err != nil || ev.Name != key {
+				t.Errorf("after the replay got %s %q (err %v), want a live create for %q",
+					ev.EventType, ev.Name, ev.Err, key)
+			}
+		})
 	}
 }
 
