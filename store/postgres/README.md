@@ -32,7 +32,7 @@ defer s.Close()
 
 ## Behaviour notes
 
-- **Schema**: On `New`, creates `zestor_kv`, `zestor_outbox`, and a trigger that `NOTIFY`s channel `zestor_events` after each outbox insert.
+- **Schema**: On `New`, creates `zestor_kv`, `zestor_outbox`, and a trigger that `NOTIFY`s channel `zestor_events_v2` with `<ns_id>|<kind>` after each outbox insert.
 - **Watch**: Mutations append to the outbox; the dedicated listener drains rows for the notified kind and publishes to local subscribers (same semantics as other stores for `WatchOption`: buffer size, initial replay, event-type filter).
 - **Multi-tenant**: Use distinct `Namespace` values for isolated keyspaces over the same physical tables.
 - **Tests**: Set `POSTGRES_CONN` to a reachable DSN; if the database is unavailable, tests skip.
