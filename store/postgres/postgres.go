@@ -424,6 +424,9 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.
 		return store.SetUnchanged, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.lockOutbox(ctx, tx); err != nil {
+		return store.SetUnchanged, err
+	}
 
 	ct, err := tx.Exec(ctx,
 		`INSERT INTO zestor_kv(ns_id,kind,key,value) VALUES($1,$2,$3,$4)
@@ -487,6 +490,9 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.lockOutbox(ctx, tx); err != nil {
+		return false, err
+	}
 
 	var curBytes []byte
 	var cur T
@@ -547,6 +553,9 @@ func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.lockOutbox(ctx, tx); err != nil {
+		return err
+	}
 
 	// The existing encoded values, not just the key set: a key whose bytes are
 	// unchanged must be skipped entirely, the way a single Set skips it.
@@ -600,6 +609,9 @@ func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, err
 		return false, zero, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.lockOutbox(ctx, tx); err != nil {
+		return false, zero, err
+	}
 
 	var prevBytes []byte
 	err = tx.QueryRow(ctx,
@@ -629,6 +641,26 @@ func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, err
 		return false, zero, err
 	}
 	return true, prev, nil
+}
+
+// outboxLockClass is the first key of the two-key advisory lock taken by
+// lockOutbox. PostgreSQL keeps the two-key and single-bigint advisory lock
+// spaces separate, so this cannot collide with an application's bigint locks.
+const outboxLockClass int32 = 0x7a657374 // "zest"
+
+// lockOutbox serialises the write transactions of one namespace, across every
+// process sharing the database. Outbox ids come from a sequence, which hands
+// them out at INSERT time rather than at commit; without this lock a
+// transaction holding a lower id can commit after the drain has already moved
+// its cursor past a higher one, and its event is never delivered. The lock is
+// released only after the commit is visible, so ids become visible in order.
+//
+// It must be the first statement of every write transaction. Taking it after a
+// row lock would let two writers each hold what the other is waiting for.
+func (s *storePG[T]) lockOutbox(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`,
+		outboxLockClass, int32(s.ns^(s.ns>>32)))
+	return err
 }
 
 func (s *storePG[T]) appendOutbox(ctx context.Context, tx pgx.Tx, kind, key string, etype store.EventType, value []byte) error {

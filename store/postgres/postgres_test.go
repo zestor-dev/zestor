@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -264,6 +265,72 @@ func TestWatchIgnoresWritesFromBeforeSubscribe(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("a write made after subscribing never arrived")
+	}
+}
+
+// Outbox ids are allocated when a row is inserted, not when its transaction
+// commits. Concurrent writers can therefore commit out of id order, and a drain
+// that advances its cursor past a row whose transaction has not committed yet
+// skips that row forever — a silent gap. Every committed write must reach the
+// watcher exactly once.
+func TestConcurrentWritersLeaveNoGaps(t *testing.T) {
+	ctx := context.Background()
+	ns := nextNamespace()
+
+	reader := newStore[TestData](t, ns)
+	defer reader.Close()
+	writers := []store.Store[TestData]{newStore[TestData](t, ns), newStore[TestData](t, ns)}
+	for _, w := range writers {
+		defer w.Close()
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	const goroutines, perGoroutine = 8, 40
+	ch, err := reader.Watch(watchCtx, "k", store.WithBufferSize[TestData](4*goroutines*perGoroutine))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for g := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := writers[g%len(writers)]
+			for i := range perGoroutine {
+				if _, err := w.Set(ctx, "k", fmt.Sprintf("g%02d-%03d", g, i), TestData{Value: i}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	const want = goroutines * perGoroutine
+	seen := make(map[string]int, want)
+	deadline := time.After(20 * time.Second)
+	for len(seen) < want {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatalf("watch channel closed after %d of %d keys", len(seen), want)
+			}
+			if ev.Err != nil {
+				t.Fatalf("watch terminated after %d of %d keys: %v", len(seen), want, ev.Err)
+			}
+			seen[ev.Name]++
+		case <-deadline:
+			n, _ := reader.Count(ctx, "k")
+			t.Fatalf("watcher received %d of %d keys, but the store holds %d: committed writes were skipped",
+				len(seen), want, n)
+		}
+	}
+	for k, n := range seen {
+		if n != 1 {
+			t.Errorf("key %s delivered %d times, want once", k, n)
+		}
 	}
 }
 
