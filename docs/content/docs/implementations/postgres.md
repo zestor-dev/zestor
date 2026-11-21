@@ -93,7 +93,7 @@ The store creates (if missing):
 
 - **`zestor_kv`**: `(ns_id, kind, key)` primary key, `value BYTEA`, `version`, `updated_at`
 - **`zestor_outbox`**: append-only rows with `etype` in `create` / `update` / `delete`
-- **Trigger** on `zestor_outbox` → `pg_notify('zestor_events', payload)`
+- **Trigger** on `zestor_outbox` → `pg_notify('zestor_events_v2', '<ns_id>|<kind>')`. The payload deliberately omits the key, so keys of any content or length are safe; only a kind approaching 8000 bytes would exceed PostgreSQL's NOTIFY limit
 
 Exact DDL is applied inside `New`; you normally do not manage these tables by hand except for **outbox retention** (delete aged rows in production).
 

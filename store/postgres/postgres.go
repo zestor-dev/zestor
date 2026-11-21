@@ -24,6 +24,9 @@ import (
 
 const (
 	defaultTimeout = 10 * time.Second
+
+	// notifyChannel is the LISTEN/NOTIFY channel fed by zestor_notify_v2.
+	notifyChannel = "zestor_events_v2"
 )
 
 type Options struct {
@@ -220,18 +223,30 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		 );`,
 		`CREATE INDEX IF NOT EXISTS idx_outbox_kind ON zestor_outbox(ns_id, kind, id);`,
 
-		`CREATE OR REPLACE FUNCTION zestor_notify() RETURNS TRIGGER AS $$
-		   DECLARE payload TEXT;
+		// The payload carries only what the listener needs to pick a drain, kind
+		// last so it may contain anything. Keys used to be included too, which
+		// broke parsing on a '|' and made long keys exceed pg_notify's
+		// 8000-byte limit, failing the write.
+		//
+		// The function, trigger and channel are versioned rather than replaced
+		// in place: New re-installs them on every start, so during a rolling
+		// upgrade an old instance would otherwise put back a payload format the
+		// new ones cannot parse.
+		`CREATE OR REPLACE FUNCTION zestor_notify_v2() RETURNS TRIGGER AS $$
 		   BEGIN
-		     payload := NEW.ns_id::text || '|' || NEW.kind || '|' || NEW.key || '|' || NEW.etype || '|' || NEW.id::text;
-		     PERFORM pg_notify('zestor_events', payload);
+		     PERFORM pg_notify('` + notifyChannel + `', NEW.ns_id::text || '|' || NEW.kind);
 		     RETURN NEW;
 		   END; $$ LANGUAGE plpgsql;`,
 
-		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify ON zestor_outbox;`,
-		`CREATE TRIGGER trg_zestor_outbox_notify
+		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify_v2 ON zestor_outbox;`,
+		`CREATE TRIGGER trg_zestor_outbox_notify_v2
 		   AFTER INSERT ON zestor_outbox
-		   FOR EACH ROW EXECUTE PROCEDURE zestor_notify();`,
+		   FOR EACH ROW EXECUTE PROCEDURE zestor_notify_v2();`,
+
+		// The unversioned trigger still raises "payload string too long" on
+		// long keys, so it must not outlive the upgrade.
+		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify ON zestor_outbox;`,
+		`DROP FUNCTION IF EXISTS zestor_notify();`,
 	}
 
 	for _, q := range stmts {
@@ -949,7 +964,7 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
-		if _, err := conn.Exec(ctx, `LISTEN zestor_events`); err != nil {
+		if _, err := conn.Exec(ctx, `LISTEN `+notifyChannel); err != nil {
 			acq.Release()
 			if ctx.Err() != nil {
 				return
@@ -988,7 +1003,7 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 				if ntf == nil {
 					continue
 				}
-				ns, kind, _, _, _, perr := parsePayload(ntf.Payload)
+				ns, kind, perr := parsePayload(ntf.Payload)
 				if perr != nil {
 					continue
 				}
@@ -1009,20 +1024,18 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 	}
 }
 
-func parsePayload(p string) (ns int64, kind, key, etype string, id int64, err error) {
-	parts := strings.Split(p, "|")
-	if len(parts) != 5 {
-		return 0, "", "", "", 0, errors.New("invalid payload")
+// parsePayload splits a zestor_notify_v2 payload, "<ns>|<kind>". The kind is
+// everything after the first separator and may itself contain '|'.
+func parsePayload(p string) (ns int64, kind string, err error) {
+	nsStr, kind, ok := strings.Cut(p, "|")
+	if !ok {
+		return 0, "", errors.New("invalid payload")
 	}
-	ns, err = strconv.ParseInt(parts[0], 10, 64)
+	ns, err = strconv.ParseInt(nsStr, 10, 64)
 	if err != nil {
-		return
+		return 0, "", err
 	}
-	kind = parts[1]
-	key = parts[2]
-	etype = parts[3]
-	id, err = strconv.ParseInt(parts[4], 10, 64)
-	return
+	return ns, kind, nil
 }
 
 func (s *storePG[T]) Close() error {

@@ -334,6 +334,49 @@ func TestConcurrentWritersLeaveNoGaps(t *testing.T) {
 	}
 }
 
+// Keys and kinds are arbitrary strings. The NOTIFY that wakes the drain must
+// survive any of them: a payload that fails to parse leaves the event stranded
+// until some later write to the kind, and one that exceeds pg_notify's 8000-byte
+// limit aborts the write itself.
+func TestNotifySurvivesArbitraryNames(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, key string
+	}{
+		{"PipeInKey", "k", "a|b|c|d|e"},
+		{"PipeInKind", "a|b", "k"},
+		{"LongKey", "k", strings.Repeat("x", 8000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStore[TestData](t, nextNamespace())
+			defer s.Close()
+
+			watchCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			ch, err := s.Watch(watchCtx, tc.kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Set(ctx, tc.kind, tc.key, TestData{Name: "v"}); err != nil {
+				t.Fatalf("Set: %v", err)
+			}
+
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					t.Fatal("watch channel closed before the event arrived")
+				}
+				if ev.Err != nil || ev.Name != tc.key {
+					t.Errorf("got %s for a %d-byte key (err %v), want a create for the written key",
+						ev.EventType, len(ev.Name), ev.Err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the write's event was never delivered")
+			}
+		})
+	}
+}
+
 func TestDumpIncludesVersion(t *testing.T) {
 	ctx := context.Background()
 	s := newStore[TestData](t, nextNamespace())
