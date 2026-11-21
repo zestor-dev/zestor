@@ -52,7 +52,7 @@ CREATE INDEX idx_kv_kind ON zestor_kv(kind);
 type Options struct {
     DSN         string        // SQLite DSN (required)
     Codec       codec.Codec   // Marshaling codec (required)
-    BusyTimeout time.Duration // PRAGMA busy_timeout (optional)
+    BusyTimeout time.Duration // PRAGMA busy_timeout on every connection (optional; don't also set it in DSN)
     DisableWAL  bool          // Disable WAL mode (optional)
 }
 ```

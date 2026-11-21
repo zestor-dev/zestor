@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +56,8 @@ type Options struct {
 	// Codec to use for marshaling/unmarshaling values.
 	Codec codec.Codec
 
-	// If > 0, PRAGMA busy_timeout (ms) will be set.
+	// If > 0, PRAGMA busy_timeout (ms) is set on every connection. Do not also
+	// set busy_timeout in DSN; New rejects that.
 	BusyTimeout time.Duration
 
 	// If true, WAL mode will be disabled.
@@ -88,22 +91,29 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		return nil, errors.New("sqlite: Options.Codec is required")
 	}
 
-	db, err := sql.Open("sqlite", o.DSN)
+	dsn := o.DSN
+	if o.BusyTimeout > 0 {
+		// The driver gives no defined order between two busy_timeout pragmas.
+		if strings.Contains(strings.ToLower(dsn), "busy_timeout") {
+			return nil, errors.New("sqlite: set busy_timeout in Options.BusyTimeout or in the DSN, not both")
+		}
+		// busy_timeout is per connection, so it goes in the DSN, which the
+		// driver applies to every connection the pool opens. Running the PRAGMA
+		// once through the *sql.DB would reach a single pooled connection.
+		dsn = withPragma(dsn, fmt.Sprintf("busy_timeout(%d)", o.BusyTimeout.Milliseconds()))
+	}
+
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
+	// journal_mode=WAL is persistent in the database file, so setting it once
+	// is enough.
 	if !o.DisableWAL {
 		if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("enable WAL: %w", err)
-		}
-	}
-	if o.BusyTimeout > 0 {
-		ms := int(o.BusyTimeout / time.Millisecond)
-		if _, err := db.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout=%d;`, ms)); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("set busy_timeout: %w", err)
 		}
 	}
 
@@ -118,6 +128,15 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		codec: o.Codec,
 		hub:   watchhub.New[T](),
 	}, nil
+}
+
+// withPragma appends a _pragma query parameter to dsn.
+func withPragma(dsn, pragma string) string {
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + "_pragma=" + url.QueryEscape(pragma)
 }
 
 // guard rejects operations on a closed store, and honours an already-cancelled

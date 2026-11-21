@@ -72,6 +72,13 @@ func TestNewValidatesOptions(t *testing.T) {
 	if _, err := sqlite.New[Note](ctx, sqlite.Options{DSN: dsn(t)}); err == nil {
 		t.Error("New without a Codec must fail")
 	}
+	if _, err := sqlite.New[Note](ctx, sqlite.Options{
+		DSN:         dsn(t) + "?_pragma=busy_timeout(100)",
+		Codec:       &codec.JSON{},
+		BusyTimeout: time.Second,
+	}); err == nil {
+		t.Error("New with busy_timeout in both the DSN and Options.BusyTimeout must fail")
+	}
 }
 
 func TestPersistsAcrossReopen(t *testing.T) {

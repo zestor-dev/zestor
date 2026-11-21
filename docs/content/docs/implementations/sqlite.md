@@ -63,7 +63,7 @@ func main() {
 type Options struct {
     DSN         string        // SQLite connection string (required)
     Codec       codec.Codec   // Serialization codec (required)
-    BusyTimeout time.Duration // Lock wait timeout (optional)
+    BusyTimeout time.Duration // Lock wait timeout, applied to every connection (optional; don't also set busy_timeout in DSN)
     DisableWAL  bool          // Disable WAL mode (optional)
 }
 ```
