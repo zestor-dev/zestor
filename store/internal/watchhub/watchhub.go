@@ -96,9 +96,7 @@ func (h *Hub[T]) Subscribe(ctx context.Context, kind string, cfg *store.WatchCfg
 			h.mu.Unlock()
 			return nil, err
 		}
-		for _, ev := range evs {
-			s.enqueue(ev)
-		}
+		s.replay = evs
 	}
 	if h.subs[kind] == nil {
 		h.subs[kind] = make(map[*sub[T]]struct{})
@@ -178,6 +176,12 @@ type sub[T any] struct {
 	notify chan struct{}
 	stop   chan struct{}
 
+	// replay is the initial snapshot, delivered by run ahead of pending. It is
+	// kept out of pending so that capacity measures lag behind live writes
+	// only: a snapshot larger than capacity must not overflow a watch that
+	// has not had a chance to read anything yet.
+	replay []*store.Event[T]
+
 	mu         sync.Mutex
 	pending    []*store.Event[T]
 	overflowed bool
@@ -227,6 +231,18 @@ func (s *sub[T]) enqueue(ev *store.Event[T]) {
 // or closes it.
 func (s *sub[T]) run(ctx context.Context) {
 	defer close(s.ch)
+
+	replay := s.replay
+	s.replay = nil
+	for _, ev := range replay {
+		select {
+		case s.ch <- ev:
+		case <-ctx.Done():
+			return
+		case <-s.stop:
+			return
+		}
+	}
 
 	for {
 		s.mu.Lock()
