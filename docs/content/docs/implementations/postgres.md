@@ -118,6 +118,7 @@ Same as SQLite: pass any `codec.Codec` ([Codecs](/docs/concepts/codec/) — JSON
 | Topic | Notes |
 |-------|--------|
 | Outbox growth | Plan retention / compaction |
+| Write concurrency | Writes to one namespace are serialised (a transaction-level advisory lock, across all processes) so that watchers see every committed write in order. Reads are unaffected; use separate namespaces to scale independent write traffic. A `SetFn` transform runs while that lock is held, so keep it short |
 | `SetFn` | Requires existing key (`ErrKeyNotFound` otherwise), like `sqlite` / `gomap` |
 | Validation / compare hooks | Not supported (same as `sqlite`) |
 
