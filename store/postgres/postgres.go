@@ -34,6 +34,11 @@ const (
 	schemaLockID int64 = 0x7a65737400000002
 )
 
+// listenIdleTimeout is how long the listener waits for a notification before
+// looping. The wait ending is not a connection failure, and the session stays
+// listening. Tests shorten it.
+var listenIdleTimeout = 60 * time.Second
+
 type Options struct {
 	// Example: postgres://user:pass@host:5432/dbname?sslmode=disable
 	ConnString string
@@ -1012,75 +1017,75 @@ func (s *storePG[T]) listenLoop(ctx context.Context) {
 			backoff = min(backoff*2, 5*time.Second)
 			continue
 		}
+		// The listener owns this session. Returning it to the pool on an idle
+		// timeout lets the next Acquire hand out a different one, and a
+		// notification sent to the old session is gone.
+		conn := acq.Hijack()
 		backoff = 200 * time.Millisecond
-		conn := acq.Conn()
-
-		if _, err := conn.Exec(ctx, `UNLISTEN *`); err != nil {
-			acq.Release()
-			if ctx.Err() != nil {
-				return
-			}
-			time.Sleep(backoff)
-			backoff = min(backoff*2, 5*time.Second)
-			continue
-		}
-		if _, err := conn.Exec(ctx, `LISTEN `+notifyChannel); err != nil {
-			acq.Release()
-			if ctx.Err() != nil {
-				return
-			}
-			time.Sleep(backoff)
-			backoff = min(backoff*2, 5*time.Second)
-			continue
-		}
-		s.signalListenReady()
-
-		// reacquire indicates the connection should be re-acquired (e.g. after a
-		// WaitForNotification error). exitLoop indicates a clean shutdown of the
-		// outer loop. In all cases we must Release acq exactly once via this block.
-		exitLoop, reacquire := func() (bool, bool) {
-			defer acq.Release()
-			for {
-				if ctx.Err() != nil {
-					return true, false
-				}
-				s.mu.RLock()
-				closed := s.closed
-				s.mu.RUnlock()
-				if closed {
-					return true, false
-				}
-
-				waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-				ntf, err := conn.WaitForNotification(waitCtx)
-				cancel()
-				if err != nil {
-					if ctx.Err() != nil {
-						return true, false
-					}
-					return false, true
-				}
-				if ntf == nil {
-					continue
-				}
-				ns, kind, perr := parsePayload(ntf.Payload)
-				if perr != nil {
-					continue
-				}
-				if ns != s.ns {
-					continue
-				}
-				s.triggerDrain(ctx, kind)
-			}
-		}()
-		if exitLoop {
+		err = s.serveListen(ctx, conn)
+		conn.Close(context.Background())
+		if err == nil || ctx.Err() != nil {
 			return
 		}
-		if reacquire {
-			time.Sleep(backoff)
-			backoff = min(backoff*2, 5*time.Second)
+		time.Sleep(backoff)
+		backoff = min(backoff*2, 5*time.Second)
+	}
+}
+
+// serveListen listens until ctx is cancelled or the connection fails. A nil
+// return is a clean shutdown. A wait that simply expires is not a failure:
+// the session is still listening.
+func (s *storePG[T]) serveListen(ctx context.Context, conn *pgx.Conn) error {
+	if _, err := conn.Exec(ctx, `UNLISTEN *`); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	if _, err := conn.Exec(ctx, `LISTEN `+notifyChannel); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	s.signalListenReady()
+	// Anything committed while this session was not listening has no NOTIFY
+	// waiting for it. The outbox still has the rows.
+	for _, kind := range s.hub.Kinds() {
+		s.triggerDrain(ctx, kind)
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		s.mu.RLock()
+		closed := s.closed
+		s.mu.RUnlock()
+		if closed {
+			return nil
+		}
+
+		waitCtx, cancel := context.WithTimeout(ctx, listenIdleTimeout)
+		ntf, err := conn.WaitForNotification(waitCtx)
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
+			return err
+		}
+		if ntf == nil {
 			continue
 		}
+		ns, kind, perr := parsePayload(ntf.Payload)
+		if perr != nil || ns != s.ns {
+			continue
+		}
+		s.triggerDrain(ctx, kind)
 	}
 }
 

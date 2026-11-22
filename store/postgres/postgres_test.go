@@ -115,6 +115,74 @@ type TestData struct {
 // that is only reading (ACCESS SHARE, what a plain SELECT holds) has to keep
 // writers moving, and New used to DROP TRIGGER on every start, which waits
 // for that lock and then blocks every writer.
+// PostgreSQL does not keep a notification that was sent while this session
+// was not listening. Reconnecting used to resume from the next NOTIFY only,
+// so a write in the gap never reached the watcher. After LISTEN the store
+// has to read the outbox for the kinds it is already watching.
+func TestWriteDuringListenReconnectIsDelivered(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	defer s.Close()
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch, err := s.Watch(watchCtx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var pid int
+	err = conn.QueryRow(ctx, `
+SELECT pid FROM pg_stat_activity
+ WHERE pid <> pg_backend_pid()
+   AND query LIKE '%LISTEN zestor_events_v2%'
+ LIMIT 1`).Scan(&pid)
+	if err != nil {
+		t.Fatalf("find listen connection: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid); err != nil {
+		t.Fatal(err)
+	}
+	// The old listener sleeps before it connects again. Write while nobody is
+	// listening, which is the gap a NOTIFY does not cross.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var n int
+		if err := conn.QueryRow(ctx, `
+SELECT count(*) FROM pg_stat_activity
+ WHERE pid <> pg_backend_pid() AND query LIKE '%LISTEN zestor_events_v2%'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("listen connection was not dropped")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if _, err := s.Set(ctx, "k", "during", TestData{Name: "gap"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("watch closed before the write arrived")
+		}
+		if ev.Err != nil || ev.Name != "during" {
+			t.Fatalf("got %s %q (err %v), want the write made while reconnecting", ev.EventType, ev.Name, ev.Err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a write made while the listener was reconnecting was never delivered")
+	}
+}
+
 func TestNewDoesNotLockOutbox(t *testing.T) {
 	ctx := context.Background()
 	existing := newStore[TestData](t, nextNamespace())
