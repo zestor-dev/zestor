@@ -349,6 +349,47 @@ func TestPersistsAcrossReopen(t *testing.T) {
 
 // The point of the postgres backend: a write in one process reaches a watcher in
 // another. Two independent stores over the same namespace stand in for that.
+// Two kinds are drained independently: a watcher of one still receives a
+// write while the other kind also has a watcher.
+func TestKindsDeliverIndependently(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	defer s.Close()
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a, err := s.Watch(watchCtx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Watch(watchCtx, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(ctx, "a", "one", TestData{Name: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(ctx, "b", "two", TestData{Name: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		ch   <-chan *store.Event[TestData]
+		name string
+	}{{a, "one"}, {b, "two"}} {
+		select {
+		case ev, ok := <-tc.ch:
+			if !ok {
+				t.Fatalf("watch for %s closed", tc.name)
+			}
+			if ev.Err != nil || ev.Name != tc.name {
+				t.Fatalf("got %s %q (err %v), want %s", ev.EventType, ev.Name, ev.Err, tc.name)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %s never arrived", tc.name)
+		}
+	}
+}
+
 func TestCrossInstanceWatch(t *testing.T) {
 	ctx := context.Background()
 	ns := nextNamespace()

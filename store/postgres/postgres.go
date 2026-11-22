@@ -67,22 +67,21 @@ type storePG[T any] struct {
 	// closing the pool, so those operations never observe a closed pool.
 	inflight sync.WaitGroup
 
-	// drainMu serializes the outbox drain against Watch. It is held across a
-	// whole batch — read, publish, advance the cursor — and across Watch's
-	// catch-up plus subscribe. Guarding only the cursor is not enough: a drain
-	// that has read a batch but not yet published it would otherwise deliver
-	// those events into a subscription registered in the meantime, which is
-	// exactly the "events that predate the watcher" bug.
+	// cursorsMu guards the map of per-kind drain locks. The lock inside a
+	// kindCursor serializes that kind's drain against a Watch of the same kind.
+	// It is held across a whole batch — read, publish, advance the cursor —
+	// and across Watch's catch-up plus subscribe. A drain that has read a
+	// batch but not yet published it would otherwise deliver those events into
+	// a subscription registered in the meantime.
 	//
-	// Lock order is drainMu -> hub lock. The hub lock is only ever taken inside
-	// Publish and Subscribe, after the pooled connection has been released, so
-	// the hub lock never covers I/O and the two can never deadlock.
-	drainMu sync.Mutex
-	lastID  map[string]int64
+	// Kinds do not share this lock, so a slow Watch of one kind does not stall
+	// delivery for the others. Lock order is kindCursor.mu -> hub lock.
+	cursorsMu sync.Mutex
+	cursors   map[string]*kindCursor
 
 	// stateMu guards the per-kind drain bookkeeping only. It is separate from
-	// drainMu so that a NOTIFY arriving during a long drain (or during a Watch)
-	// can record itself without blocking the listen loop.
+	// the kind's drain lock so that a NOTIFY arriving during a long drain (or
+	// during a Watch) can record itself without blocking the listen loop.
 	stateMu  sync.Mutex
 	draining map[string]*drainState
 	// startID is where a kind's cursor begins when it is first seen: the outbox
@@ -134,7 +133,7 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		ns:           o.Namespace,
 		timeout:      o.Timeout,
 		hub:          watchhub.New[T](),
-		lastID:       make(map[string]int64),
+		cursors:      make(map[string]*kindCursor),
 		draining:     make(map[string]*drainState),
 		listenCancel: listenCancel,
 		listenReady:  make(chan struct{}),
@@ -179,10 +178,27 @@ func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
 		`SELECT COALESCE(MAX(id), 0) FROM zestor_outbox WHERE ns_id=$1`, s.ns).Scan(&maxID); err != nil {
 		return err
 	}
-	s.drainMu.Lock()
+	// Written before the listen goroutine starts, and never written again.
 	s.startID = maxID
-	s.drainMu.Unlock()
 	return nil
+}
+
+// kindCursor is one kind's drain lock and outbox cursor.
+type kindCursor struct {
+	mu     sync.Mutex
+	lastID int64
+	seen   bool
+}
+
+func (s *storePG[T]) cursor(kind string) *kindCursor {
+	s.cursorsMu.Lock()
+	defer s.cursorsMu.Unlock()
+	c := s.cursors[kind]
+	if c == nil {
+		c = &kindCursor{}
+		s.cursors[kind] = c
+	}
+	return c
 }
 
 // guard rejects operations on a closed store, honours an already-cancelled
@@ -809,16 +825,18 @@ func (s *storePG[T]) Watch(ctx context.Context, kind string, opts ...store.Watch
 	// writes that predate it — which is what the old test suite slept a second
 	// to avoid.
 	//
-	// Holding drainMu across the catch-up and the subscribe is what makes the
-	// flush stick: it locks out the drain loop entirely, including a batch it
-	// has already read but not yet published.
+	// Holding this kind's drain lock across the catch-up and the subscribe is
+	// what makes the flush stick: it locks out that kind's drain, including a
+	// batch it has already read but not yet published. Other kinds are not
+	// waiting on this lock.
 	//
 	// The watch itself is bound to ctx, not opCtx: Options.Timeout bounds the
 	// catch-up and snapshot queries, not the lifetime of the watch.
-	s.drainMu.Lock()
-	defer s.drainMu.Unlock()
+	c := s.cursor(kind)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if err := s.catchUpLocked(opCtx, kind); err != nil {
+	if err := s.catchUpLocked(opCtx, c, kind); err != nil {
 		return nil, err
 	}
 
@@ -872,15 +890,15 @@ func (s *storePG[T]) signalListenReady() {
 
 // drainBatchLocked publishes one batch of outbox rows for kind and advances the
 // cursor, reporting whether there was anything to read. The caller must hold
-// drainMu for the whole call, which is what keeps a batch from being published
+// c.mu for the whole call, which is what keeps a batch from being published
 // into a subscription created while it was being read.
 //
 // The rows are fully collected and the connection released before publishing,
 // so the hub lock is never held across I/O.
-func (s *storePG[T]) drainBatchLocked(ctx context.Context, kind string) (bool, error) {
-	cursor, seen := s.lastID[kind]
-	if !seen {
-		cursor = s.startID
+func (s *storePG[T]) drainBatchLocked(ctx context.Context, c *kindCursor, kind string) (bool, error) {
+	cursor := s.startID
+	if c.seen {
+		cursor = c.lastID
 	}
 
 	qctx, qcancel := context.WithTimeout(ctx, s.timeout)
@@ -940,8 +958,9 @@ SELECT id, key, etype, value
 	if len(evs) > 0 {
 		s.hub.Publish(kind, evs...)
 	}
-	if cur, seen := s.lastID[kind]; highest > cursor && (!seen || highest > cur) {
-		s.lastID[kind] = highest
+	if highest > cursor {
+		c.lastID = highest
+		c.seen = true
 	}
 	if decodeErr != nil {
 		// Events already queued are delivered first; then the watch ends.
@@ -952,16 +971,16 @@ SELECT id, key, etype, value
 	return len(evs) > 0, nil
 }
 
-// catchUpLocked drains kind to exhaustion. The caller must hold drainMu and keep
+// catchUpLocked drains kind to exhaustion. The caller must hold c.mu and keep
 // holding it through Subscribe: on return, everything committed so far has been
-// handed to the subscribers that already exist, and no drain can publish again
-// until the lock is released.
-func (s *storePG[T]) catchUpLocked(ctx context.Context, kind string) error {
+// handed to the subscribers that already exist, and no drain of this kind can
+// publish again until the lock is released.
+func (s *storePG[T]) catchUpLocked(ctx context.Context, c *kindCursor, kind string) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		more, err := s.drainBatchLocked(ctx, kind)
+		more, err := s.drainBatchLocked(ctx, c, kind)
 		if err != nil {
 			return err
 		}
@@ -978,26 +997,28 @@ func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
 	}
 	// Nobody is watching, so decoding the rows would be wasted. Remember how
 	// far the outbox got instead. A later Watch catches up from this cursor
-	// and does not receive the writes that predate it. Recheck under drainMu:
-	// a watcher can arrive while this waits, and that watcher needs a real drain.
-	s.drainMu.Lock()
+	// and does not receive the writes that predate it. Recheck under the
+	// kind's lock: a watcher can arrive while this waits, and that watcher
+	// needs a real drain.
+	c := s.cursor(kind)
+	c.mu.Lock()
 	watching := s.hub.Watching(kind)
 	if !watching {
-		s.advanceCursorLocked(ctx, kind)
+		s.advanceCursorLocked(ctx, c, kind)
 	}
-	s.drainMu.Unlock()
+	c.mu.Unlock()
 	if watching {
 		s.launchDrain(ctx, kind)
 	}
 }
 
 // advanceCursorLocked moves kind's cursor to the newest committed outbox row.
-// The caller holds drainMu. Writers in a namespace commit in id order, so a
+// The caller holds c.mu. Writers in a namespace commit in id order, so a
 // committed max cannot leave an older row still in flight.
-func (s *storePG[T]) advanceCursorLocked(ctx context.Context, kind string) {
-	cursor, seen := s.lastID[kind]
-	if !seen {
-		cursor = s.startID
+func (s *storePG[T]) advanceCursorLocked(ctx context.Context, c *kindCursor, kind string) {
+	cursor := s.startID
+	if c.seen {
+		cursor = c.lastID
 	}
 	var maxID int64
 	err := s.pool.QueryRow(ctx, `
@@ -1007,7 +1028,8 @@ SELECT COALESCE(MAX(id), $3)
 	if err != nil || maxID <= cursor {
 		return
 	}
-	s.lastID[kind] = maxID
+	c.lastID = maxID
+	c.seen = true
 }
 
 func (s *storePG[T]) launchDrain(ctx context.Context, kind string) {
@@ -1029,10 +1051,11 @@ func (s *storePG[T]) launchDrain(ctx context.Context, kind string) {
 	go func() {
 		defer s.listenWG.Done()
 		for {
+			c := s.cursor(kind)
 			for ctx.Err() == nil {
-				s.drainMu.Lock()
-				more, err := s.drainBatchLocked(ctx, kind)
-				s.drainMu.Unlock()
+				c.mu.Lock()
+				more, err := s.drainBatchLocked(ctx, c, kind)
+				c.mu.Unlock()
 				if err != nil {
 					select {
 					case <-ctx.Done():

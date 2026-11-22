@@ -15,12 +15,12 @@
 //	backend write lock -> hub lock
 //
 // and must take its write lock before calling Subscribe as well. The snapshot
-// callback passed to Subscribe runs with the hub lock held, so it must not
-// acquire the backend write lock itself — the caller already holds it.
+// callback runs before the hub lock and must not acquire a lock the caller
+// already holds. The caller is what keeps publishers out for the duration.
 //
 // Backends whose events originate elsewhere (postgres, where a drain loop
-// publishes in outbox-id order) need no write lock at all: the hub lock alone
-// makes the snapshot atomic with respect to publication.
+// publishes in outbox-id order) keep that drain out with their own per-kind
+// lock, held across Subscribe.
 package watchhub
 
 import (
@@ -79,9 +79,11 @@ type Hooks[T any] struct {
 
 // Subscribe registers a watcher for kind and returns its event channel.
 //
-// The snapshot runs while publishers are locked out, and the subscription is
-// only made visible afterwards. That ordering is what makes the
-// replay-precedes-live guarantee hold without an asynchronous replay goroutine.
+// The caller must already be excluding publishers for kind, and must keep
+// them excluded for the whole call. The snapshot therefore runs before the
+// hub lock: it can do I/O without stalling publishers of other kinds. The
+// subscription is made visible only after the snapshot is queued, which is
+// what makes replay precede live.
 //
 // The returned channel is closed when ctx is cancelled, when the watch
 // overflows, or when the hub is closed.
@@ -106,18 +108,18 @@ func (h *Hub[T]) Subscribe(ctx context.Context, kind string, cfg *store.WatchCfg
 		stop:       make(chan struct{}),
 	}
 
+	if cfg.Initial && hooks.Snapshot != nil && s.wants(store.EventTypeCreate) {
+		evs, err := hooks.Snapshot()
+		if err != nil {
+			return nil, err
+		}
+		s.replay = evs
+	}
+
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
 		return nil, store.ErrClosed
-	}
-	if cfg.Initial && hooks.Snapshot != nil && s.wants(store.EventTypeCreate) {
-		evs, err := hooks.Snapshot()
-		if err != nil {
-			h.mu.Unlock()
-			return nil, err
-		}
-		s.replay = evs
 	}
 	if h.subs[kind] == nil {
 		h.subs[kind] = make(map[*sub[T]]struct{})
