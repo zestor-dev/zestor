@@ -6,7 +6,7 @@ linkTitle = "Zestor"
 {{< blocks/cover title="" image_anchor="top" height="min" >}}
 <img src="/images/logo.svg" alt="Zestor Logo" style="max-width: 200px; margin-bottom: 1.5rem;">
 <h1 class="display-1 fw-bold">Zestor</h1>
-<p class="lead mt-3 mb-4">A generic, type-safe, in-memory key-value store for Go with realtime watch capabilities.</p>
+<p class="lead mt-3 mb-4">A generic, type-safe key-value store for Go, with realtime watch and in-memory, SQLite, and Postgres backends.</p>
 <div class="mt-4">
 <a class="btn btn-lg btn-primary me-3 mb-4" href="/docs/">
   Get Started <i class="fas fa-arrow-alt-circle-right ms-2"></i>
@@ -21,7 +21,7 @@ linkTitle = "Zestor"
 
 
 {{% blocks/lead color="primary" %}}
-Zestor provides a simple yet powerful way to manage in-memory data in Go applications.
+Zestor provides a simple yet powerful way to manage key-value data in Go applications.
 
 Built with **generics**, **thread-safety**, and **real-time notifications** in mind.
 {{% /blocks/lead %}}

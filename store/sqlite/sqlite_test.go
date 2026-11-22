@@ -264,10 +264,10 @@ func (c *failCodec) Marshal(v any) ([]byte, error) {
 
 func (c *failCodec) Unmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
 
-// A write that fails partway through must roll its transaction back. Regression
-// test for FIX-PLAN T0.1: rollback used to be conditional on a named error that
-// every `if err := ...` shadowed, so a failed write leaked the transaction, held
-// the SQLite write lock forever and wedged the store for the life of the process.
+// A write that fails partway through must roll its transaction back. Rollback
+// used to be conditional on a named error that every `if err := ...` shadowed,
+// so a failed write leaked the transaction, held the SQLite write lock forever,
+// and wedged the store for the life of the process.
 func TestFailedWriteRollsBack(t *testing.T) {
 	ctx := context.Background()
 	c := &failCodec{}
@@ -321,7 +321,6 @@ func TestFailedWriteRollsBack(t *testing.T) {
 // Watch's initial replay used to send from an unsynchronised goroutine while
 // cancel() closed the same channel, which panicked the process. The watch hub
 // makes the subscriber goroutine the only writer and closer of its channel.
-// Regression test for FIX-PLAN T0.2.
 func TestWatchReplayCancelRace(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t, dsn(t))

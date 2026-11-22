@@ -8,7 +8,7 @@ description: >
 
 ## The Store Interface
 
-Zestor's core is the `Store` interface, which provides a complete set of operations for managing in-memory data:
+Zestor's core is the `Store` interface, which provides a complete set of operations for managing key-value data. The in-memory, SQLite, and Postgres backends all implement it:
 
 ```go
 type Store[T any] interface {

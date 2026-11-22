@@ -1,4 +1,4 @@
-module github.com/zestor-dev/zestor
+module github.com/zestor-dev/zestor/docs
 
 go 1.25
 

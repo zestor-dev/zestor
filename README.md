@@ -4,13 +4,13 @@
 
 # Zestor
 
-A generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities.
+A generic, type-safe key-value store for Go, with watch/subscribe and in-memory, SQLite, and Postgres backends.
 
 ## Features
 
 - **Generic** — Works with any type `T`
 - **Multi-kind** — Organize data by "kind" (like tables/collections)
-- **Thread-safe** — Concurrent read/write with `sync.RWMutex`
+- **Thread-safe** — Concurrent reads and writes on every backend
 - **Watch/Subscribe** — Real-time notifications for create, update, and delete events
 - **Ordered, gap-free watches** — see [Delivery guarantees](#delivery-guarantees)
 

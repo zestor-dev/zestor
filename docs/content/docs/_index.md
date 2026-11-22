@@ -9,7 +9,7 @@ menu:
 
 Welcome to the Zestor documentation!
 
-Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities. It's designed to be simple to use while providing powerful features for building reactive applications.
+Zestor is a generic, type-safe key-value store for Go with watch/subscribe capabilities and in-memory, SQLite, and Postgres backends. It's designed to be simple to use while providing powerful features for building reactive applications.
 
 ## Key Features
 

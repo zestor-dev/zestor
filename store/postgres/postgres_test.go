@@ -105,7 +105,6 @@ func TestConformance(t *testing.T) {
 			}
 			return s
 		},
-		//
 		// Events reach watchers through a commit, a NOTIFY and an outbox drain,
 		// so the delays are far more generous than for the in-process backends.
 		EventDelay:  15 * time.Second,

@@ -84,7 +84,7 @@ func TestWatchIgnoresNilOptions(t *testing.T) {
 }
 
 // Delete and SetFn on a kind that was never written must not bring it into
-// existence (FIX-PLAN T0.4).
+// existence.
 func TestMissingKindIsNotMaterialized(t *testing.T) {
 	ctx := context.Background()
 	s := newStore(t)

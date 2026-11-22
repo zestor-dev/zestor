@@ -9,9 +9,9 @@ module:
     - path: github.com/FortAwesome/Font-Awesome
 
 params:
-  description: "Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities."
+  description: "Zestor is a generic, type-safe key-value store for Go with watch/subscribe and in-memory, SQLite, and Postgres backends."
   author: "Zestor"
-  site_description: "Zestor is a generic, type-safe, in-memory key-value store for Go with watch/subscribe capabilities."
+  site_description: "Zestor is a generic, type-safe key-value store for Go with watch/subscribe and in-memory, SQLite, and Postgres backends."
   site_author: "Zestor"
   site_url: "https://docs.zestor.dev"
   site_github: "https://github.com/zestor-dev/zestor"
