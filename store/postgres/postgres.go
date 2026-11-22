@@ -615,12 +615,34 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 	return true, nil
 }
 
+// setManyStmt upserts one key and, only when the stored bytes change, appends
+// the matching outbox row. Version starts at 1, so a returned version of 1 is
+// a create. Unchanged keys are not sent here: the caller compares first.
+const setManyStmt = `
+WITH upsert AS (
+    INSERT INTO zestor_kv(ns_id, kind, key, value)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (ns_id, kind, key) DO UPDATE
+        SET value = EXCLUDED.value,
+            version = zestor_kv.version + 1,
+            updated_at = now()
+        WHERE zestor_kv.value IS DISTINCT FROM EXCLUDED.value
+    RETURNING kind, key, value, (version = 1) AS created
+)
+INSERT INTO zestor_outbox(ns_id, kind, key, etype, value)
+SELECT $1, kind, key, CASE WHEN created THEN 'create' ELSE 'update' END, value
+FROM upsert`
+
 func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return err
 	}
 	defer cancel()
+	if len(values) == 0 {
+		return nil
+	}
+	keys := slices.Sorted(maps.Keys(values))
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -631,42 +653,42 @@ func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string
 		return err
 	}
 
-	// The existing encoded values, not just the key set: a key whose bytes are
-	// unchanged must be skipped entirely, the way a single Set skips it.
-	existing, err := s.existingRows(ctx, tx, kind)
+	// Only the keys being written. A 3-key write must not read the whole kind.
+	existing, err := s.existingValues(ctx, tx, kind, keys)
 	if err != nil {
 		return err
 	}
 
-	// Apply in key order so the outbox — and therefore the event stream — is
-	// deterministic across runs.
-	for _, k := range slices.Sorted(maps.Keys(values)) {
+	// Key order, so the outbox and the event stream stay deterministic.
+	// One statement per real change, sent together.
+	batch := &pgx.Batch{}
+	for _, k := range keys {
 		b, err := s.codec.Marshal(values[k])
 		if err != nil {
 			return err
 		}
-		prev, existed := existing[k]
-		if existed && bytes.Equal(prev, b) {
+		if prev, existed := existing[k]; existed && bytes.Equal(prev, b) {
 			continue
 		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO zestor_kv(ns_id,kind,key,value) VALUES($1,$2,$3,$4)
-             ON CONFLICT (ns_id,kind,key) DO UPDATE
-             SET value=EXCLUDED.value,
-                 version = zestor_kv.version+1,
-                 updated_at = now()`,
-			s.ns, kind, k, b); err != nil {
-			return err
-		}
-		etype := store.EventTypeCreate
-		if existed {
-			etype = store.EventTypeUpdate
-		}
-		if err := s.appendOutbox(ctx, tx, kind, k, etype, b); err != nil {
-			return err
+		batch.Queue(setManyStmt, s.ns, kind, k, b)
+	}
+	if batch.Len() == 0 {
+		return tx.Commit(ctx)
+	}
+	results := tx.SendBatch(ctx, batch)
+	var batchErr error
+	for range batch.Len() {
+		if _, err := results.Exec(); err != nil {
+			batchErr = err
+			break
 		}
 	}
-
+	if err := results.Close(); batchErr == nil {
+		batchErr = err
+	}
+	if batchErr != nil {
+		return batchErr
+	}
 	return tx.Commit(ctx)
 }
 
@@ -744,16 +766,18 @@ func (s *storePG[T]) appendOutbox(ctx context.Context, tx pgx.Tx, kind, key stri
 	return err
 }
 
-// existingRows reads the kind's encoded values. It holds one kind in memory,
-// which is the same order of data a bulk write already carries.
-func (s *storePG[T]) existingRows(ctx context.Context, tx pgx.Tx, kind string) (map[string][]byte, error) {
-	rows, err := tx.Query(ctx, `SELECT key, value FROM zestor_kv WHERE ns_id=$1 AND kind=$2`, s.ns, kind)
+// existingValues returns the stored encoding of the requested keys. Missing
+// keys are absent from the map.
+func (s *storePG[T]) existingValues(ctx context.Context, tx pgx.Tx, kind string, keys []string) (map[string][]byte, error) {
+	rows, err := tx.Query(ctx, `
+SELECT key, value FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2 AND key = ANY($3)`, s.ns, kind, keys)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make(map[string][]byte)
+	out := make(map[string][]byte, len(keys))
 	for rows.Next() {
 		var k string
 		var v []byte

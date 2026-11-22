@@ -697,6 +697,20 @@ func TestUndecodableOutboxRowDoesNotStallKind(t *testing.T) {
 	}
 }
 
+func TestSetManyEmpty(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	if err := s.SetMany(ctx, "k", nil); err != nil {
+		t.Fatalf("empty SetMany: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMany(ctx, "k", nil); !errors.Is(err, store.ErrClosed) {
+		t.Errorf("empty SetMany on a closed store returned %v, want ErrClosed", err)
+	}
+}
+
 func TestDumpIncludesVersion(t *testing.T) {
 	ctx := context.Background()
 	s := newStore[TestData](t, nextNamespace())
