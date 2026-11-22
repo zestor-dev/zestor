@@ -14,6 +14,7 @@ func TestKindCursorsAreIndependent(t *testing.T) {
 	go func() {
 		b := s.cursor("b")
 		b.mu.Lock()
+		b.lastID = 1
 		b.mu.Unlock()
 		close(done)
 	}()
