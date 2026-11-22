@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/zestor-dev/zestor/codec"
 	"github.com/zestor-dev/zestor/store"
@@ -374,6 +377,73 @@ func TestNotifySurvivesArbitraryNames(t *testing.T) {
 				t.Fatal("the write's event was never delivered")
 			}
 		})
+	}
+}
+
+// Set used to insert with DO NOTHING, then read the row back to decide
+// whether to update. That insert does not lock the existing row, so a delete
+// that does not take the store's write lock can remove it in between and Set
+// fails with "no rows". Store deletes take the lock, so the racing delete here
+// is a raw one.
+func TestSetSurvivesConcurrentDelete(t *testing.T) {
+	ctx := context.Background()
+	ns := nextNamespace()
+	s := newStore[TestData](t, ns)
+	defer s.Close()
+	if _, err := s.Set(ctx, "k", "a", TestData{Name: "seed"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range 8 {
+		conn, err := pgx.Connect(ctx, getPostgresConn())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(ctx)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				// Put the row straight back, so the next Set takes the update
+				// path, which is the path with the gap. A delete that only
+				// removes the row makes almost every Set an insert, and the
+				// gap never opens.
+				if _, err := conn.Exec(ctx, `DELETE FROM zestor_kv WHERE ns_id=$1 AND kind='k' AND key='a'`, ns); err != nil {
+					t.Errorf("raw delete: %v", err)
+					return
+				}
+				if _, err := conn.Exec(ctx, `INSERT INTO zestor_kv(ns_id,kind,key,value) VALUES($1,'k','a','"seed"') ON CONFLICT DO NOTHING`, ns); err != nil {
+					t.Errorf("raw insert: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	noRows := 0
+	deadline := time.Now().Add(3 * time.Second)
+	for i := 0; time.Now().Before(deadline); i++ {
+		_, err := s.Set(ctx, "k", "a", TestData{Name: "v", Value: i})
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			noRows++
+			continue
+		}
+		t.Errorf("Set: %v", err)
+	}
+	close(stop)
+	wg.Wait()
+	if noRows > 0 {
+		t.Fatalf("Set failed with no rows %d times while a delete raced it", noRows)
 	}
 }
 
