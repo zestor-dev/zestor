@@ -828,9 +828,10 @@ SELECT id, key, etype, value
 	}
 
 	var (
-		evs     []*store.Event[T]
-		highest = cursor
-		iterErr error
+		evs       []*store.Event[T]
+		highest   = cursor
+		iterErr   error
+		decodeErr error
 	)
 	for rows.Next() {
 		var id int64
@@ -842,7 +843,12 @@ SELECT id, key, etype, value
 		}
 		var obj T
 		if err := s.codec.Unmarshal(val, &obj); err != nil {
-			iterErr = fmt.Errorf("outbox row %d (%s/%s): %w", id, kind, name, err)
+			// Skip the row. Leaving the cursor in front of it makes every
+			// later drain retry it forever, and every later Watch fails.
+			decodeErr = fmt.Errorf("%w: outbox row %d (%s/%s): %v", store.ErrDecode, id, kind, name, err)
+			if id > highest {
+				highest = id
+			}
 			break
 		}
 		evs = append(evs, &store.Event[T]{
@@ -863,16 +869,19 @@ SELECT id, key, etype, value
 	if iterErr != nil {
 		return false, iterErr
 	}
-	if len(evs) == 0 {
-		return false, nil
+	if len(evs) > 0 {
+		s.hub.Publish(kind, evs...)
 	}
-
-	s.hub.Publish(kind, evs...)
-
-	if cur, seen := s.lastID[kind]; !seen || highest > cur {
+	if cur, seen := s.lastID[kind]; highest > cursor && (!seen || highest > cur) {
 		s.lastID[kind] = highest
 	}
-	return true, nil
+	if decodeErr != nil {
+		// Events already queued are delivered first; then the watch ends.
+		// The cursor is past the bad row, so a re-watch is not stuck on it.
+		s.hub.Fail(kind, decodeErr)
+		return true, nil
+	}
+	return len(evs) > 0, nil
 }
 
 // catchUpLocked drains kind to exhaustion. The caller must hold drainMu and keep

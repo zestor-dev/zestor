@@ -133,6 +133,23 @@ func (h *Hub[T]) Publish(kind string, evs ...*store.Event[T]) {
 	}
 }
 
+// Fail ends every subscriber of kind. Events already queued are delivered
+// first, then a terminal EventTypeError carrying err, then the channel is
+// closed. A nil err or a closed hub does nothing.
+func (h *Hub[T]) Fail(kind string, err error) {
+	if err == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	for s := range h.subs[kind] {
+		s.fail(err)
+	}
+}
+
 // Close terminates every subscriber and waits for their channels to be closed,
 // so that a caller returning from Close knows no watcher is still live.
 func (h *Hub[T]) Close() {
@@ -189,6 +206,10 @@ type sub[T any] struct {
 	pending    []*store.Event[T]
 	inflight   int
 	overflowed bool
+	// failed ends the watch after the events already queued. failErr is the
+	// terminal error, set together with failed.
+	failed  bool
+	failErr error
 }
 
 func (s *sub[T]) wants(et store.EventType) bool {
@@ -211,7 +232,7 @@ func (s *sub[T]) enqueue(ev *store.Event[T]) {
 		return
 	}
 	s.mu.Lock()
-	if s.overflowed {
+	if s.overflowed || s.failed {
 		s.mu.Unlock()
 		return
 	}
@@ -258,6 +279,8 @@ func (s *sub[T]) run(ctx context.Context) {
 		s.pending = nil
 		s.inflight = len(batch)
 		overflowed := s.overflowed
+		failed := s.failed
+		failErr := s.failErr
 		s.mu.Unlock()
 
 		for _, ev := range batch {
@@ -274,6 +297,15 @@ func (s *sub[T]) run(ctx context.Context) {
 			}
 		}
 
+		if failed {
+			select {
+			case s.ch <- &store.Event[T]{Kind: s.kind, EventType: store.EventTypeError, Err: failErr}:
+			case <-ctx.Done():
+			case <-s.stop:
+				s.reportClosed(ctx)
+			}
+			return
+		}
 		if overflowed {
 			select {
 			case s.ch <- &store.Event[T]{Kind: s.kind, EventType: store.EventTypeError, Err: store.ErrWatchOverflow}:
@@ -299,6 +331,24 @@ func (s *sub[T]) run(ctx context.Context) {
 // The send does not block. Close waits for run to return, so blocking here
 // would deadlock it against a consumer that is not reading; a consumer that is
 // waiting has room, because it has already taken whatever the channel held.
+// fail marks the watch done once the events already queued have been
+// delivered. It does not drop that queue: those events happened.
+func (s *sub[T]) fail(err error) {
+	s.mu.Lock()
+	if s.failed || s.overflowed {
+		s.mu.Unlock()
+		return
+	}
+	s.failed = true
+	s.failErr = err
+	s.mu.Unlock()
+
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
+}
+
 func (s *sub[T]) reportClosed(ctx context.Context) {
 	if ctx.Err() != nil {
 		return

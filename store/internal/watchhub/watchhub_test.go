@@ -2,6 +2,7 @@ package watchhub
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -40,6 +41,43 @@ func TestInFlightCountsTowardCapacity(t *testing.T) {
 
 // The initial snapshot is not lag, so it is delivered whole even when it is
 // larger than the buffer and the consumer has not read anything yet.
+func TestFailDeliversQueuedEventsThenCloses(t *testing.T) {
+	h := New[int]()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer h.Close()
+
+	ch, err := h.Subscribe(ctx, "k", &store.WatchCfg[int]{BufferSize: 4}, Hooks[int]{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := h.Subscribe(ctx, "k", &store.WatchCfg[int]{
+		BufferSize: 4,
+		EventTypes: map[store.EventType]struct{}{store.EventTypeDelete: {}},
+	}, Hooks[int]{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Publish("k", ev(1))
+	h.Fail("k", store.ErrDecode)
+
+	got, ok := <-ch
+	if !ok || got.Err != nil || got.Object != 1 {
+		t.Fatalf("queued event: ok=%v got=%v", ok, got)
+	}
+	got, ok = <-ch
+	if !ok || !errors.Is(got.Err, store.ErrDecode) {
+		t.Fatalf("terminal event: ok=%v got=%v", ok, got)
+	}
+	if _, ok = <-ch; ok {
+		t.Fatal("channel stayed open after ErrDecode")
+	}
+	got, ok = <-filtered
+	if !ok || !errors.Is(got.Err, store.ErrDecode) {
+		t.Fatalf("filtered watcher: ok=%v got=%v", ok, got)
+	}
+}
+
 func TestReplayDoesNotCountTowardCapacity(t *testing.T) {
 	h := New[int]()
 	ctx, cancel := context.WithCancel(context.Background())
