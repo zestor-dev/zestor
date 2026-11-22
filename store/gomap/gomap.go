@@ -43,9 +43,22 @@ func NewMemStore[T any](opt store.StoreOptions[T]) store.Store[T] {
 	return ms
 }
 
+func requireKind(kind string) error {
+	if kind == "" {
+		return store.ErrKindRequired
+	}
+	return nil
+}
+
 func (s *memStore[T]) ensureKind(kind string) {
 	if _, ok := s.kinds[kind]; !ok {
 		s.kinds[kind] = make(map[string]T)
+	}
+}
+
+func (s *memStore[T]) dropEmptyKind(kind string) {
+	if len(s.kinds[kind]) == 0 {
+		delete(s.kinds, kind)
 	}
 }
 
@@ -63,6 +76,9 @@ func (s *memStore[T]) Get(ctx context.Context, kind, key string) (T, bool, error
 	if err := ctx.Err(); err != nil {
 		return zero, false, err
 	}
+	if err := requireKind(kind); err != nil {
+		return zero, false, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -75,6 +91,9 @@ func (s *memStore[T]) Get(ctx context.Context, kind, key string) (T, bool, error
 
 func (s *memStore[T]) List(ctx context.Context, kind string, filters ...store.FilterFunc[T]) (map[string]T, error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := requireKind(kind); err != nil {
 		return nil, err
 	}
 	s.mu.RLock()
@@ -99,6 +118,9 @@ func (s *memStore[T]) Keys(ctx context.Context, kind string) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := requireKind(kind); err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -113,6 +135,9 @@ func (s *memStore[T]) Keys(ctx context.Context, kind string) ([]string, error) {
 
 func (s *memStore[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[T], error) {
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := requireKind(kind); err != nil {
 		return nil, err
 	}
 	s.mu.RLock()
@@ -131,6 +156,9 @@ func (s *memStore[T]) Count(ctx context.Context, kind string) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	if err := requireKind(kind); err != nil {
+		return 0, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
@@ -143,18 +171,21 @@ func (s *memStore[T]) Set(ctx context.Context, kind, key string, value T) (store
 	if err := ctx.Err(); err != nil {
 		return store.SetUnchanged, err
 	}
+	if err := requireKind(kind); err != nil {
+		return store.SetUnchanged, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return store.SetUnchanged, store.ErrClosed
 	}
-	s.ensureKind(kind)
 
 	if fn, ok := s.validationFns[kind]; ok {
 		if err := fn(value); err != nil {
 			return store.SetUnchanged, err
 		}
 	}
+	s.ensureKind(kind)
 
 	prev, existed := s.kinds[kind][key]
 	if existed && s.compareFn(prev, value) {
@@ -177,12 +208,17 @@ func (s *memStore[T]) SetMany(ctx context.Context, kind string, values map[strin
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := requireKind(kind); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return store.ErrClosed
 	}
-	s.ensureKind(kind)
+	if len(values) == 0 {
+		return nil
+	}
 
 	// validate all values first
 	if fn, ok := s.validationFns[kind]; ok {
@@ -192,6 +228,7 @@ func (s *memStore[T]) SetMany(ctx context.Context, kind string, values map[strin
 			}
 		}
 	}
+	s.ensureKind(kind)
 
 	// Apply in key order so the event stream is deterministic across runs.
 	evs := make([]*store.Event[T], 0, len(values))
@@ -218,6 +255,9 @@ func (s *memStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, er
 	if err := ctx.Err(); err != nil {
 		return false, zero, err
 	}
+	if err := requireKind(kind); err != nil {
+		return false, zero, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -229,6 +269,7 @@ func (s *memStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, er
 		return false, zero, nil
 	}
 	delete(s.kinds[kind], key)
+	s.dropEmptyKind(kind)
 
 	s.hub.Publish(kind, &store.Event[T]{Kind: kind, Name: key, EventType: store.EventTypeDelete, Object: prev})
 	return true, prev, nil
@@ -236,6 +277,9 @@ func (s *memStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, er
 
 func (s *memStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
 	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := requireKind(kind); err != nil {
 		return false, err
 	}
 	s.mu.Lock()
@@ -274,8 +318,8 @@ func (s *memStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) 
 }
 
 func (s *memStore[T]) Watch(ctx context.Context, kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], error) {
-	if kind == "" {
-		return nil, store.ErrKindRequired
+	if err := requireKind(kind); err != nil {
+		return nil, err
 	}
 	cfg := &store.WatchCfg[T]{}
 	for _, o := range opts {

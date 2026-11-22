@@ -94,6 +94,8 @@ func Run(t *testing.T, cfg Config) {
 		{"ListAppliesFilters", testListAppliesFilters},
 		{"ReadersAgree", testReadersAgree},
 		{"KindsAreIsolated", testKindsAreIsolated},
+		{"WritesRequireKind", testWritesRequireKind},
+		{"EmptyKindIsGoneAfterDelete", testEmptyKindIsGoneAfterDelete},
 
 		// --- context (C2) -----------------------------------------------
 		{"CancelledContextIsRejected", testCancelledContextIsRejected},
@@ -522,6 +524,66 @@ func testKindsAreIsolated(t *testing.T, cfg Config) {
 	}
 	if _, ok, _ := s.Get(ctx, "b", "same"); !ok {
 		t.Error("deleting from one kind removed the same key from another")
+	}
+}
+
+// Watch rejects an empty kind, so a write or read of one would create or
+// surface a kind nobody can ever watch.
+func testWritesRequireKind(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	ctx := context.Background()
+
+	if _, err := s.Set(ctx, "", "a", Value{Name: "a"}); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Set with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if err := s.SetMany(ctx, "", map[string]Value{"a": {Name: "a"}}); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("SetMany with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := s.SetFn(ctx, "", "a", func(v Value) (Value, error) { return v, nil }); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("SetFn with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, _, err := s.Delete(ctx, "", "a"); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Delete with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, _, err := s.Get(ctx, "", "a"); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Get with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := s.List(ctx, ""); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("List with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := s.Count(ctx, ""); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Count with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := s.Keys(ctx, ""); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Keys with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := s.Values(ctx, ""); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("Values with an empty kind returned %v, want ErrKindRequired", err)
+	}
+	all, err := s.GetAll(ctx)
+	if err != nil {
+		t.Fatalf("GetAll: %v", err)
+	}
+	if _, ok := all[""]; ok {
+		t.Error("a rejected write left an empty kind behind")
+	}
+}
+
+// Deleting the last key of a kind must leave GetAll with no entry for it, so
+// backends that keep an in-process kind map match those that store rows only.
+func testEmptyKindIsGoneAfterDelete(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	ctx := context.Background()
+	mustSet(t, s, "k", "a", Value{Name: "a", N: 1})
+	if _, _, err := s.Delete(ctx, "k", "a"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	all, err := s.GetAll(ctx)
+	if err != nil {
+		t.Fatalf("GetAll: %v", err)
+	}
+	if _, ok := all["k"]; ok {
+		t.Error("GetAll still lists a kind whose last key was deleted")
 	}
 }
 
