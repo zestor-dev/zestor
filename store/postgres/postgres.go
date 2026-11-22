@@ -47,6 +47,8 @@ type Options struct {
 	// Optional namespace/tenant id. Defaults to 0.
 	Namespace int64
 	// Upper bound applied to each operation, on top of the caller's context.
+	// Zero uses the default of 10s. A negative value means no cap: only the
+	// caller's deadline applies, including to List, GetAll, and watch catch-up.
 	Timeout time.Duration
 	// OutboxRetention, when set, deletes outbox rows older than this age.
 	// Rows this store has not yet consumed are kept. Zero leaves the outbox
@@ -135,7 +137,7 @@ func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOp
 	if o.Timeout == 0 {
 		o.Timeout = defaultTimeout
 	}
-	dialCtx, cancelDial := context.WithTimeout(ctx, o.Timeout)
+	dialCtx, cancelDial := boundContext(ctx, o.Timeout)
 	defer cancelDial()
 	pool, err := pgxpool.NewWithConfig(dialCtx, cfg)
 	if err != nil {
@@ -183,7 +185,7 @@ func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOp
 		}()
 	}
 
-	waitCtx, waitCancel := context.WithTimeout(ctx, o.Timeout)
+	waitCtx, waitCancel := boundContext(ctx, o.Timeout)
 	defer waitCancel()
 	select {
 	case <-s.listenReady:
@@ -191,7 +193,10 @@ func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOp
 		listenCancel()
 		s.listenWG.Wait()
 		pool.Close()
-		return nil, fmt.Errorf("postgres: listen loop did not become ready within %v", o.Timeout)
+		if o.Timeout > 0 {
+			return nil, fmt.Errorf("postgres: listen loop did not become ready within %v", o.Timeout)
+		}
+		return nil, fmt.Errorf("postgres: listen loop did not become ready: %w", ctx.Err())
 	}
 
 	return s, nil
@@ -223,7 +228,7 @@ func (s *storePG[T]) pruneOutbox(ctx context.Context) error {
 	if s.retention <= 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	ctx, cancel := s.bound(ctx)
 	defer cancel()
 	cutoff := time.Now().Add(-s.retention)
 
@@ -261,7 +266,7 @@ DELETE FROM zestor_outbox
 
 // seedOutboxCursor records the outbox high-water mark at open time.
 func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	ctx, cancel := s.bound(ctx)
 	defer cancel()
 	var maxID int64
 	if err := s.pool.QueryRow(ctx,
@@ -311,9 +316,22 @@ func (s *storePG[T]) cursor(kind string) *kindCursor {
 	return c
 }
 
+// bound applies Options.Timeout on top of ctx. A negative timeout means no
+// cap: the caller's deadline is the only one.
+func (s *storePG[T]) bound(ctx context.Context) (context.Context, context.CancelFunc) {
+	return boundContext(ctx, s.timeout)
+}
+
+func boundContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout < 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 // guard rejects operations on a closed store, honours an already-cancelled
 // context, and applies Options.Timeout as an upper bound on top of the caller's
-// deadline.
+// deadline. A negative timeout does not add a deadline.
 func (s *storePG[T]) guard(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -326,7 +344,7 @@ func (s *storePG[T]) guard(ctx context.Context) (context.Context, context.Cancel
 	s.inflight.Add(1)
 	s.mu.Unlock()
 
-	opCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	opCtx, cancel := s.bound(ctx)
 	var once sync.Once
 	return opCtx, func() {
 		once.Do(func() {
@@ -351,7 +369,7 @@ func (s *storePG[T]) guardKind(ctx context.Context, kind string) (context.Contex
 }
 
 func (s *storePG[T]) ensureSchema(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	ctx, cancel := s.bound(ctx)
 	defer cancel()
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1106,7 +1124,7 @@ func (s *storePG[T]) drainBatchLocked(ctx context.Context, c *kindCursor, kind s
 		cursor = c.lastID
 	}
 
-	qctx, qcancel := context.WithTimeout(ctx, s.timeout)
+	qctx, qcancel := s.bound(ctx)
 	rows, err := s.pool.Query(qctx, `
 SELECT id, key, etype, value
   FROM zestor_outbox

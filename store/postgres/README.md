@@ -22,7 +22,7 @@ s, err := postgres.New[MyData](ctx, postgres.Options{
     ConnString: "postgresql://user:pass@localhost:5432/dbname?sslmode=disable",
     Codec:      &codec.JSON{},
     Namespace:  0,                    // optional multi-tenant column (default 0)
-    Timeout:    10 * time.Second,     // optional (default 10s)
+    Timeout:    10 * time.Second,     // optional; 0 means 10s, negative means no cap
 })
 if err != nil {
     return err
