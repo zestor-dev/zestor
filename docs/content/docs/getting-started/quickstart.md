@@ -60,7 +60,7 @@ type User struct {
 func main() {
     // Create a persistent SQLite store
     s, err := sqlite.New[User](sqlite.Options{
-        DSN:   "file:myapp.db?cache=shared",
+        DSN:   "file:myapp.db",
         Codec: &codec.JSON{},
     })
     if err != nil {

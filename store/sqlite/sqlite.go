@@ -50,7 +50,7 @@ WHERE kind=? AND key=?;`
 
 type Options struct {
 	// SQLite DSN.
-	// modernc: "file:zestor.db?cache=shared&_pragma=busy_timeout(5000)"
+	// modernc: "file:zestor.db", or ":memory:" for a private in-memory database
 	DSN string
 
 	// Codec to use for marshaling/unmarshaling values.
@@ -107,6 +107,11 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	if err != nil {
 		return nil, err
 	}
+	if isMemoryDSN(o.DSN) {
+		// Each connection to an in-memory database opens its own private,
+		// empty one, so the pool must never hold more than a single connection.
+		db.SetMaxOpenConns(1)
+	}
 
 	// journal_mode=WAL is persistent in the database file, so setting it once
 	// is enough.
@@ -128,6 +133,12 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		codec: o.Codec,
 		hub:   watchhub.New[T](),
 	}, nil
+}
+
+// isMemoryDSN reports whether dsn names an in-memory database: ":memory:",
+// a "file::memory:" URI, or a URI with mode=memory.
+func isMemoryDSN(dsn string) bool {
+	return strings.Contains(dsn, ":memory:") || strings.Contains(dsn, "mode=memory")
 }
 
 // withPragma appends a _pragma query parameter to dsn.

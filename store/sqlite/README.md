@@ -23,7 +23,7 @@ go get github.com/zestor-dev/zestor/store/sqlite
 
 ```go
 s, err := sqlite.New[MyData](sqlite.Options{
-    DSN:         "file:zestor.db?cache=shared",
+    DSN:         "file:zestor.db",
     Codec:       &codec.JSON{},
     BusyTimeout: 5 * time.Second,    // optional
     DisableWAL:  false,              // optional, default false
@@ -61,10 +61,13 @@ type Options struct {
 
 ```
 file:zestor.db                           # Simple file
-file:zestor.db?cache=shared             # Shared cache
 file:zestor.db?mode=rwc                  # Read-write-create
-file::memory:?cache=shared               # In-memory shared
+:memory:                                 # In-memory, private to this store
 ```
+
+In-memory DSNs pin the store to a single connection, because each connection
+would otherwise open its own empty database. Avoid `file::memory:?cache=shared`:
+every store in the process opened with it shares one database.
 
 ## Features
 

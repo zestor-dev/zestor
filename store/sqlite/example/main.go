@@ -21,7 +21,7 @@ func main() {
 	ctx := context.Background()
 
 	s, err := sqlite.New[Note](ctx, sqlite.Options{
-		DSN:         "file:notes.db?cache=shared",
+		DSN:         "file:notes.db",
 		Codec:       &codec.JSON{},
 		BusyTimeout: 5 * time.Second,
 	})
