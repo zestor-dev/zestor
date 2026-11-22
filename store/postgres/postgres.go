@@ -48,13 +48,19 @@ type Options struct {
 	Namespace int64
 	// Upper bound applied to each operation, on top of the caller's context.
 	Timeout time.Duration
+	// OutboxRetention, when set, deletes outbox rows older than this age.
+	// Rows this store has not yet consumed are kept. Zero leaves the outbox
+	// untouched. Another process that is still behind the deleted rows will
+	// miss them, so set this longer than any consumer's lag.
+	OutboxRetention time.Duration
 }
 
 type storePG[T any] struct {
-	pool    *pgxpool.Pool
-	codec   codec.Codec
-	ns      int64
-	timeout time.Duration
+	pool      *pgxpool.Pool
+	codec     codec.Codec
+	ns        int64
+	timeout   time.Duration
+	retention time.Duration
 
 	// hub is fed by the drain loop, which reads the outbox in id order.
 	// Publication therefore needs no extra write lock here; the hub lock alone
@@ -132,6 +138,7 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		codec:        o.Codec,
 		ns:           o.Namespace,
 		timeout:      o.Timeout,
+		retention:    o.OutboxRetention,
 		hub:          watchhub.New[T](),
 		cursors:      make(map[string]*kindCursor),
 		draining:     make(map[string]*drainState),
@@ -154,6 +161,13 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		defer s.listenWG.Done()
 		s.listenLoop(listenCtx)
 	}()
+	if s.retention > 0 {
+		s.listenWG.Add(1)
+		go func() {
+			defer s.listenWG.Done()
+			s.pruneLoop(listenCtx)
+		}()
+	}
 
 	waitCtx, waitCancel := context.WithTimeout(ctx, o.Timeout)
 	defer waitCancel()
@@ -167,6 +181,68 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	}
 
 	return s, nil
+}
+
+// pruneLoop deletes consumed outbox rows older than OutboxRetention until ctx
+// is cancelled. The first wait is one interval, which is the retention itself
+// capped at a minute.
+func (s *storePG[T]) pruneLoop(ctx context.Context) {
+	interval := s.retention
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = s.pruneOutbox(ctx)
+		}
+	}
+}
+
+// pruneOutbox removes rows older than the retention that this store has
+// already moved its cursor past, plus rows that predate the store entirely.
+func (s *storePG[T]) pruneOutbox(ctx context.Context) error {
+	if s.retention <= 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	cutoff := time.Now().Add(-s.retention)
+
+	if _, err := s.pool.Exec(ctx, `
+DELETE FROM zestor_outbox
+ WHERE ns_id = $1 AND at < $2 AND id <= $3`, s.ns, cutoff, s.startID); err != nil {
+		return err
+	}
+
+	s.cursorsMu.Lock()
+	type consumed struct {
+		kind string
+		id   int64
+	}
+	var ahead []consumed
+	for kind, c := range s.cursors {
+		c.mu.Lock()
+		if c.seen && c.lastID > s.startID {
+			ahead = append(ahead, consumed{kind, c.lastID})
+		}
+		c.mu.Unlock()
+	}
+	s.cursorsMu.Unlock()
+
+	for _, c := range ahead {
+		if _, err := s.pool.Exec(ctx, `
+DELETE FROM zestor_outbox
+ WHERE ns_id = $1 AND kind = $2 AND at < $3 AND id <= $4`,
+			s.ns, c.kind, cutoff, c.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedOutboxCursor records the outbox high-water mark at open time.

@@ -76,7 +76,8 @@ type Options struct {
     ConnString string        // PostgreSQL URL (required), e.g. postgres://...
     Codec      codec.Codec   // Required
     Namespace  int64         // Optional; default 0 — isolates rows per tenant
-    Timeout    time.Duration // Per-operation timeout; default 10s
+    Timeout         time.Duration // Per-operation timeout; default 10s
+    OutboxRetention time.Duration // Delete consumed outbox rows older than this; 0 keeps them
 }
 ```
 
@@ -95,7 +96,7 @@ The store creates (if missing):
 - **`zestor_outbox`**: append-only rows with `etype` in `create` / `update` / `delete`
 - **Trigger** on `zestor_outbox` → `pg_notify('zestor_events_v2', '<ns_id>|<kind>')`. The payload deliberately omits the key, so keys of any content or length are safe; only a kind approaching 8000 bytes would exceed PostgreSQL's NOTIFY limit
 
-Exact DDL is applied inside `New`. Once the tables and the notify trigger exist, opening another store does not rebuild them, so it does not lock writers. You normally do not manage these tables by hand except for **outbox retention** (delete aged rows in production).
+Exact DDL is applied inside `New`. Once the tables and the notify trigger exist, opening another store does not rebuild them, so it does not lock writers. Set `OutboxRetention` to delete consumed rows older than that age. Rows this store has not read yet are kept. Another process that is still behind the deleted rows will miss them, so choose an age longer than any consumer's lag.
 
 ## Watch
 
@@ -117,7 +118,7 @@ Same as SQLite: pass any `codec.Codec` ([Codecs](/docs/concepts/codec/) — JSON
 
 | Topic | Notes |
 |-------|--------|
-| Outbox growth | Plan retention / compaction |
+| Outbox growth | Set `OutboxRetention`, or delete aged rows yourself |
 | Write concurrency | Writes to one namespace are serialised (a transaction-level advisory lock, across all processes) so that watchers see every committed write in order. Reads are unaffected; use separate namespaces to scale independent write traffic. A `SetFn` transform runs while that lock is held, so keep it short |
 | `SetFn` | Requires existing key (`ErrKeyNotFound` otherwise), like `sqlite` / `gomap` |
 | Validation / compare hooks | Not supported yet (`sqlite` and `gomap` support them) |
