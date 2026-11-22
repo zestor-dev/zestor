@@ -199,9 +199,24 @@ func (s *sqLiteStore[T]) guard(ctx context.Context) error {
 	return nil
 }
 
+func requireKind(kind string) error {
+	if kind == "" {
+		return store.ErrKindRequired
+	}
+	return nil
+}
+
+// guardKind is guard plus the empty-kind check that Watch already applied.
+func (s *sqLiteStore[T]) guardKind(ctx context.Context, kind string) error {
+	if err := requireKind(kind); err != nil {
+		return err
+	}
+	return s.guard(ctx)
+}
+
 func (s *sqLiteStore[T]) Get(ctx context.Context, kind, key string) (T, bool, error) {
 	var zero T
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return zero, false, err
 	}
 
@@ -221,7 +236,7 @@ func (s *sqLiteStore[T]) Get(ctx context.Context, kind, key string) (T, bool, er
 }
 
 func (s *sqLiteStore[T]) List(ctx context.Context, kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
 
@@ -257,7 +272,7 @@ func (s *sqLiteStore[T]) List(ctx context.Context, kind string, filter ...store.
 }
 
 func (s *sqLiteStore[T]) Count(ctx context.Context, kind string) (int, error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return 0, err
 	}
 
@@ -269,7 +284,7 @@ func (s *sqLiteStore[T]) Count(ctx context.Context, kind string) (int, error) {
 }
 
 func (s *sqLiteStore[T]) Keys(ctx context.Context, kind string) ([]string, error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
 
@@ -291,7 +306,7 @@ func (s *sqLiteStore[T]) Keys(ctx context.Context, kind string) ([]string, error
 }
 
 func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[T], error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
 
@@ -318,7 +333,7 @@ func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyVa
 }
 
 func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return store.SetUnchanged, err
 	}
 	if err := s.validate(kind, value); err != nil {
@@ -395,7 +410,7 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (st
 }
 
 func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return false, err
 	}
 
@@ -461,7 +476,7 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 }
 
 func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return err
 	}
 	if len(values) == 0 {
@@ -587,7 +602,7 @@ func existingRowsTx(ctx context.Context, tx *sql.Tx, kind string, keys []string)
 
 func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, error) {
 	var zero T
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return false, zero, err
 	}
 
@@ -630,10 +645,7 @@ func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T,
 }
 
 func (s *sqLiteStore[T]) Watch(ctx context.Context, kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], error) {
-	if kind == "" {
-		return nil, store.ErrKindRequired
-	}
-	if err := s.guard(ctx); err != nil {
+	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
 

@@ -189,6 +189,20 @@ func (s *storePG[T]) guard(ctx context.Context) (context.Context, context.Cancel
 	return opCtx, cancel, nil
 }
 
+func requireKind(kind string) error {
+	if kind == "" {
+		return store.ErrKindRequired
+	}
+	return nil
+}
+
+func (s *storePG[T]) guardKind(ctx context.Context, kind string) (context.Context, context.CancelFunc, error) {
+	if err := requireKind(kind); err != nil {
+		return nil, nil, err
+	}
+	return s.guard(ctx)
+}
+
 func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
@@ -260,7 +274,7 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 
 func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error) {
 	var zero T
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return zero, false, err
 	}
@@ -284,7 +298,7 @@ func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error)
 }
 
 func (s *storePG[T]) List(ctx context.Context, kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +337,7 @@ func (s *storePG[T]) List(ctx context.Context, kind string, filter ...store.Filt
 }
 
 func (s *storePG[T]) Count(ctx context.Context, kind string) (int, error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return 0, err
 	}
@@ -336,7 +350,7 @@ func (s *storePG[T]) Count(ctx context.Context, kind string) (int, error) {
 }
 
 func (s *storePG[T]) Keys(ctx context.Context, kind string) ([]string, error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +375,7 @@ func (s *storePG[T]) Keys(ctx context.Context, kind string) ([]string, error) {
 }
 
 func (s *storePG[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[T], error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +438,7 @@ func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error
 }
 
 func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return store.SetUnchanged, err
 	}
@@ -494,7 +508,7 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.
 }
 
 func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return false, err
 	}
@@ -557,7 +571,7 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 }
 
 func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return err
 	}
@@ -613,7 +627,7 @@ func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string
 
 func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, error) {
 	var zero T
-	ctx, cancel, err := s.guard(ctx)
+	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return false, zero, err
 	}
@@ -707,10 +721,7 @@ func (s *storePG[T]) existingRows(ctx context.Context, tx pgx.Tx, kind string) (
 }
 
 func (s *storePG[T]) Watch(ctx context.Context, kind string, opts ...store.WatchOption[T]) (<-chan *store.Event[T], error) {
-	if kind == "" {
-		return nil, store.ErrKindRequired
-	}
-	opCtx, cancel, err := s.guard(ctx)
+	opCtx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
