@@ -1157,7 +1157,7 @@ func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write failed
 
 func testValidationRejectsWrites(t *testing.T, cfg Config) {
 	if cfg.NewWithOptions == nil {
-		t.Skip("backend does not accept store.StoreOptions (see FIX-PLAN X3)")
+		t.Skip("backend does not accept store.StoreOptions")
 	}
 	sentinel := errors.New("invalid")
 	s := cfg.NewWithOptions(t, store.StoreOptions[Value]{
@@ -1217,7 +1217,7 @@ func testValidationRejectsWrites(t *testing.T, cfg Config) {
 
 func testCompareFnSuppressesUpdates(t *testing.T, cfg Config) {
 	if cfg.NewWithOptions == nil {
-		t.Skip("backend does not accept store.StoreOptions (see FIX-PLAN X3)")
+		t.Skip("backend does not accept store.StoreOptions")
 	}
 	s := cfg.NewWithOptions(t, store.StoreOptions[Value]{
 		// Only Name is significant; N changes are not real changes.
