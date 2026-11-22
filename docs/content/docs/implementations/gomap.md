@@ -105,7 +105,7 @@ ch, _ := s.Watch(watchCtx, "users",
         store.EventTypeCreate,
         store.EventTypeUpdate,
     ),
-    store.WithBufferSize[User](256),    // Channel buffer size
+    store.WithBufferSize[User](256),    // Live events that may be outstanding
 )
 defer stopWatching()
 

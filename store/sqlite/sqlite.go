@@ -727,8 +727,16 @@ func (s *sqLiteStore[T]) Dump(ctx context.Context, w io.Writer) error {
 		if err := rows.Scan(&kind, &key, &value, &ver, &updated); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=%s\n",
-			kind, key, ver, len(value), updated, value); err != nil {
+		var decoded T
+		if err := s.codec.Unmarshal(value, &decoded); err != nil {
+			if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=<undecodable>\n",
+				kind, key, ver, len(value), updated); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=%+v\n",
+			kind, key, ver, len(value), updated, decoded); err != nil {
 			return err
 		}
 	}

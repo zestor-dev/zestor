@@ -182,8 +182,12 @@ type sub[T any] struct {
 	// has not had a chance to read anything yet.
 	replay []*store.Event[T]
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// pending is accepted events not yet taken for delivery. inflight is the
+	// batch run is currently sending. Their sum is how far the consumer is
+	// behind, and it is what capacity limits. The initial replay is neither.
 	pending    []*store.Event[T]
+	inflight   int
 	overflowed bool
 }
 
@@ -211,7 +215,10 @@ func (s *sub[T]) enqueue(ev *store.Event[T]) {
 		s.mu.Unlock()
 		return
 	}
-	if len(s.pending) >= s.capacity {
+	// inflight counts too. Otherwise a batch already taken for delivery stops
+	// counting, and a second full queue can build up behind it: the consumer
+	// falls behind by about twice the buffer before the watch ends.
+	if s.inflight+len(s.pending) >= s.capacity {
 		// The consumer has to re-list anyway, so holding the backlog buys
 		// nothing; drop it and let run deliver the terminal event.
 		s.overflowed = true
@@ -248,12 +255,16 @@ func (s *sub[T]) run(ctx context.Context) {
 		s.mu.Lock()
 		batch := s.pending
 		s.pending = nil
+		s.inflight = len(batch)
 		overflowed := s.overflowed
 		s.mu.Unlock()
 
 		for _, ev := range batch {
 			select {
 			case s.ch <- ev:
+				s.mu.Lock()
+				s.inflight--
+				s.mu.Unlock()
 			case <-ctx.Done():
 				return
 			case <-s.stop:

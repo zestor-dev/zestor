@@ -25,8 +25,8 @@ type Reader[T any] interface {
     Get(ctx context.Context, kind, key string) (val T, ok bool, err error)
     List(ctx context.Context, kind string, filter ...FilterFunc[T]) (map[string]T, error)
     Count(ctx context.Context, kind string) (int, error)
-    Keys(ctx context.Context, kind string) ([]string, error)
-    Values(ctx context.Context, kind string) ([]KeyValue[T], error)
+    Keys(ctx context.Context, kind string) ([]string, error)          // unordered
+    Values(ctx context.Context, kind string) ([]KeyValue[T], error) // unordered
     GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
 ```
@@ -91,9 +91,11 @@ type Event[T any] struct {
     Kind      string    // The kind (e.g., "users")
     Name      string    // The key (e.g., "alice")
     EventType EventType // create, update, or delete
-    Object    T         // The value (previous value for delete)
+    Object    T         // Value the writer passed in (previous value for delete)
 }
 ```
+
+`gomap` and `sqlite` deliver the writer's value, which aliases the caller's data when `T` contains a slice, map, or pointer. Don't mutate it. `postgres` delivers the value decoded from storage.
 
 ### EventType
 
@@ -161,7 +163,7 @@ Configuration for watchers.
 type WatchCfg[T any] struct {
     Initial    bool                    // Replay existing data
     EventTypes map[EventType]struct{} // Filter event types
-    BufferSize int                     // Channel buffer size
+    BufferSize int                     // Live events outstanding before overflow; 0 uses the default
 }
 ```
 
@@ -199,7 +201,7 @@ func WithEventTypes[T any](eventTypes ...EventType) WatchOption[T]
 
 ### WithBufferSize
 
-Set channel buffer size (default: 128).
+How many live events may be outstanding before the watch overflows (default: 128). The initial replay does not count.
 
 ```go
 func WithBufferSize[T any](size int) WatchOption[T]

@@ -109,6 +109,7 @@ func Run(t *testing.T, cfg Config) {
 		{"WatchReplayPrecedesLive", testWatchReplayPrecedesLive},
 		{"WatchPreservesWriteOrder", testWatchPreservesWriteOrder},
 		{"WatchOverflowIsSignalled", testWatchOverflowIsSignalled},
+		{"WatchKeepingUpDoesNotOverflow", testWatchKeepingUpDoesNotOverflow},
 		{"WatchOverflowBypassesTypeFilter", testWatchOverflowBypassesTypeFilter},
 		{"WatchContextCancelClosesChannel", testWatchContextCancelClosesChannel},
 		{"WatchMultipleWatchersAreIndependent", testWatchMultipleWatchersAreIndependent},
@@ -873,6 +874,12 @@ func testWatchOverflowIsSignalled(t *testing.T, cfg Config) {
 		t.Fatal("watch delivered nothing at all")
 	}
 	last := evs[len(evs)-1]
+	// The cap counts events accepted but not yet sent, so a consumer that never
+	// reads is told after about one buffer, not two. The delivery channel holds
+	// one event past the count.
+	if data := len(evs) - 1; data > 5 {
+		t.Errorf("a buffer of 4 delivered %d data events before overflow, want at most 5", data)
+	}
 	if last.EventType != store.EventTypeError {
 		t.Fatalf("a watcher that fell behind received %d events ending in %s, with no indication "+
 			"that its view is incomplete; want a terminal EventTypeError",
@@ -884,6 +891,20 @@ func testWatchOverflowIsSignalled(t *testing.T, cfg Config) {
 	for _, ev := range evs[:len(evs)-1] {
 		if ev.EventType == store.EventTypeError {
 			t.Error("EventTypeError must be the final event on the channel")
+		}
+	}
+}
+
+// A consumer that reads each event before the next write is not behind, at any
+// buffer size, and must not be told that it overflowed.
+func testWatchKeepingUpDoesNotOverflow(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	ch := watchCtx(t, cfg, s, "k", store.WithBufferSize[Value](4))
+	for i := range 40 {
+		mustSet(t, s, "k", fmt.Sprintf("k%02d", i), Value{Name: "v", N: i})
+		ev := recv(t, cfg, ch)
+		if ev.Err != nil || ev.Name != fmt.Sprintf("k%02d", i) {
+			t.Fatalf("event %d: %s %q (err %v)", i, ev.EventType, ev.Name, ev.Err)
 		}
 	}
 }
