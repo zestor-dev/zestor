@@ -392,6 +392,52 @@ func TestCrossInstanceWatch(t *testing.T) {
 // published — before the subscription becomes visible.
 //
 // Deliberately no sleep before Watch: the sleep is what used to hide this.
+// Writes to a kind with no watcher must not be delivered to a watcher that
+// arrives later, and a write after that watcher subscribes still must be.
+func TestUnwatchedWritesAreNotReplayed(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	defer s.Close()
+
+	for i := range 20 {
+		if _, err := s.Set(ctx, "quiet", fmt.Sprintf("k%02d", i), TestData{Name: "before", Value: i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Let the notifications move the cursor before the watcher exists.
+	time.Sleep(300 * time.Millisecond)
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch, err := s.Watch(watchCtx, "quiet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("watch closed")
+		}
+		t.Fatalf("watcher received %s %s for a write that predates it", ev.EventType, ev.Name)
+	case <-time.After(400 * time.Millisecond):
+	}
+
+	if _, err := s.Set(ctx, "quiet", "after", TestData{Name: "after"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("watch closed before the later write")
+		}
+		if ev.Err != nil || ev.Name != "after" {
+			t.Fatalf("got %s %q (err %v), want the write made after subscribing", ev.EventType, ev.Name, ev.Err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a write made after subscribing never arrived")
+	}
+}
+
 func TestWatchIgnoresWritesFromBeforeSubscribe(t *testing.T) {
 	ctx := context.Background()
 	s := newStore[TestData](t, nextNamespace())
