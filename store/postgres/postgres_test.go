@@ -105,6 +105,12 @@ func TestConformance(t *testing.T) {
 			}
 			return s
 		},
+		// Two pools, one namespace: the watch lives on a different store from
+		// at least one writer, which is where a skipped outbox row shows up.
+		NewShared: func(t *testing.T) (store.Store[storetest.Value], store.Store[storetest.Value]) {
+			ns := nextNamespace()
+			return newStore[storetest.Value](t, ns), newStore[storetest.Value](t, ns)
+		},
 		// Events reach watchers through a commit, a NOTIFY and an outbox drain,
 		// so the delays are far more generous than for the in-process backends.
 		EventDelay:  15 * time.Second,
