@@ -464,9 +464,13 @@ func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[st
 	if err := s.guard(ctx); err != nil {
 		return err
 	}
+	if len(values) == 0 {
+		return nil
+	}
+	keys := slices.Sorted(maps.Keys(values))
 	// Validate the whole batch before touching the database, so a rejected
 	// batch writes nothing.
-	for _, k := range slices.Sorted(maps.Keys(values)) {
+	for _, k := range keys {
 		if err := s.validate(kind, values[k]); err != nil {
 			return err
 		}
@@ -486,9 +490,7 @@ func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[st
 		}
 	}()
 
-	// The existing encoded values, not just the key set: a key whose bytes are
-	// unchanged must be skipped entirely, the way a single Set skips it.
-	existing, err := existingRowsTx(ctx, tx, kind)
+	existing, err := existingRowsTx(ctx, tx, kind, keys)
 	if err != nil {
 		return err
 	}
@@ -507,7 +509,7 @@ ON CONFLICT(kind,key) DO UPDATE SET
 
 	// Apply in key order so the event stream is deterministic across runs.
 	evs := make([]*store.Event[T], 0, len(values))
-	for _, k := range slices.Sorted(maps.Keys(values)) {
+	for _, k := range keys {
 		v := values[k]
 		enc, err := s.codec.Marshal(v)
 		if err != nil {
@@ -542,27 +544,45 @@ ON CONFLICT(kind,key) DO UPDATE SET
 	return nil
 }
 
-// existingRowsTx reads and fully drains the kind's encoded values, so the rows
-// are closed before the caller issues further statements on the same
-// transaction. It holds one kind in memory, which is the same order of data a
-// bulk write already carries.
-func existingRowsTx(ctx context.Context, tx *sql.Tx, kind string) (map[string][]byte, error) {
-	rows, err := tx.QueryContext(ctx, listQuery, kind)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// existingChunk bounds the keys bound into one IN (...) list, well under
+// SQLite's limit on host parameters.
+const existingChunk = 500
 
-	out := make(map[string][]byte)
-	for rows.Next() {
-		var k string
-		var v []byte
-		if err := rows.Scan(&k, &v); err != nil {
+// existingRowsTx returns the stored encoding of each of keys that exists in
+// kind. The encoded bytes, not just existence, are needed: a key whose value is
+// unchanged must be skipped entirely, the way a single Set skips it. Only the
+// requested keys are read, so the cost follows the batch, not the kind. Each
+// chunk's rows are drained and closed before the next statement runs on tx.
+func existingRowsTx(ctx context.Context, tx *sql.Tx, kind string, keys []string) (map[string][]byte, error) {
+	out := make(map[string][]byte, len(keys))
+	for chunk := range slices.Chunk(keys, existingChunk) {
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, kind)
+		for _, k := range chunk {
+			args = append(args, k)
+		}
+		q := `SELECT key, value FROM zestor_kv WHERE kind=? AND key IN (?` +
+			strings.Repeat(",?", len(chunk)-1) + `);`
+		if err := func() error {
+			rows, err := tx.QueryContext(ctx, q, args...)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var k string
+				var v []byte
+				if err := rows.Scan(&k, &v); err != nil {
+					return err
+				}
+				out[k] = v
+			}
+			return rows.Err()
+		}(); err != nil {
 			return nil, err
 		}
-		out[k] = v
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T, error) {
