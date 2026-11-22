@@ -75,6 +75,29 @@ func BenchmarkSet(b *testing.B) {
 	}
 }
 
+func BenchmarkSetMany10k(b *testing.B) {
+	s := benchStore(b)
+	ctx := context.Background()
+	vals := make(map[string]Note, benchKindSize)
+	keys := make([]string, benchKindSize)
+	for i := range benchKindSize {
+		keys[i] = fmt.Sprintf("k%05d", i)
+		vals[keys[i]] = Note{Title: "s"}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; b.Loop(); n++ {
+		for _, k := range keys {
+			v := vals[k]
+			v.N = n
+			vals[k] = v
+		}
+		if err := s.SetMany(ctx, "k", vals); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkSetMany3Into10k(b *testing.B) {
 	s := benchStore(b)
 	ctx := context.Background()
