@@ -277,6 +277,24 @@ SELECT tgname FROM pg_trigger
 	}
 }
 
+// A negative Timeout must not add a deadline of its own.
+func TestNegativeTimeoutDisablesCap(t *testing.T) {
+	ctx := context.Background()
+	s, err := postgres.New[TestData](ctx, postgres.Options{
+		ConnString: getPostgresConn(),
+		Codec:      &codec.JSON{},
+		Namespace:  nextNamespace(),
+		Timeout:    -1,
+	})
+	if err != nil {
+		reportPostgresErr(t, err)
+	}
+	defer s.Close()
+	if _, _, err := s.Get(ctx, "k", "a"); err != nil {
+		t.Fatalf("Get with no timeout cap returned %v", err)
+	}
+}
+
 func TestNewValidatesOptions(t *testing.T) {
 	ctx := context.Background()
 

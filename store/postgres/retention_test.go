@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -99,6 +100,29 @@ RETURNING id`, ns).Scan(&fresh)
 	// The cursor now covers the second row, and it is older than the retention.
 	if n := outboxCount(t, conn, ns, "second"); n != 0 {
 		t.Errorf("consumed old row still present: count %d", n)
+	}
+}
+
+func TestTinyTimeoutExpiresGet(t *testing.T) {
+	connStr := os.Getenv("POSTGRES_CONN")
+	if connStr == "" {
+		t.Skip("POSTGRES_CONN not set")
+	}
+	ctx := context.Background()
+	st, err := New[retainVal](ctx, Options{
+		ConnString: connStr,
+		Codec:      &codec.JSON{},
+		Namespace:  time.Now().UnixNano(),
+		Timeout:    10 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := st.(*storePG[retainVal])
+	s.timeout = time.Nanosecond
+	if _, _, err := s.Get(ctx, "k", "a"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Get with a 1ns timeout returned %v, want DeadlineExceeded", err)
 	}
 }
 

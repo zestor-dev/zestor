@@ -76,7 +76,7 @@ type Options struct {
     ConnString string        // PostgreSQL URL (required), e.g. postgres://...
     Codec      codec.Codec   // Required
     Namespace  int64         // Optional; default 0 — isolates rows per tenant
-    Timeout         time.Duration // Per-operation timeout; default 10s
+    Timeout         time.Duration // Per-operation cap; 0 means 10s, negative means no cap
     OutboxRetention time.Duration // Delete consumed outbox rows older than this; 0 keeps them
 }
 ```
