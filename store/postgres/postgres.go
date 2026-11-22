@@ -53,6 +53,9 @@ type storePG[T any] struct {
 
 	mu     sync.RWMutex
 	closed bool
+	// inflight counts operations that passed guard. Close waits for it before
+	// closing the pool, so those operations never observe a closed pool.
+	inflight sync.WaitGroup
 
 	// drainMu serializes the outbox drain against Watch. It is held across a
 	// whole batch — read, publish, advance the cursor — and across Watch's
@@ -179,14 +182,22 @@ func (s *storePG[T]) guard(ctx context.Context) (context.Context, context.Cancel
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	s.mu.RLock()
-	closed := s.closed
-	s.mu.RUnlock()
-	if closed {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return nil, nil, store.ErrClosed
 	}
+	s.inflight.Add(1)
+	s.mu.Unlock()
+
 	opCtx, cancel := context.WithTimeout(ctx, s.timeout)
-	return opCtx, cancel, nil
+	var once sync.Once
+	return opCtx, func() {
+		once.Do(func() {
+			cancel()
+			s.inflight.Done()
+		})
+	}, nil
 }
 
 func requireKind(kind string) error {
@@ -1064,6 +1075,8 @@ func (s *storePG[T]) Close() error {
 		s.listenCancel()
 	}
 	s.listenWG.Wait()
+	// In-flight calls finish against an open pool and return their real result.
+	s.inflight.Wait()
 	s.hub.Close()
 	s.pool.Close()
 	return nil

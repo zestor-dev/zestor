@@ -82,9 +82,12 @@ type sqLiteStore[T any] struct {
 	// encoded bytes, which avoids decoding the stored value.
 	compareFn store.CompareFunc[T]
 
-	// closed flag
-	mu     sync.RWMutex
-	closed bool
+	// closed flag. mu also covers inflight: an operation increments it only while
+	// it observes the store open, and Close waits for it before closing the
+	// database, so a call that got past guard never sees a closed database.
+	mu       sync.RWMutex
+	closed   bool
+	inflight sync.WaitGroup
 }
 
 // New creates/opens the DB, applies the schema, and returns a Store[T].
@@ -191,13 +194,16 @@ func (s *sqLiteStore[T]) guard(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
 		return store.ErrClosed
 	}
+	s.inflight.Add(1)
 	return nil
 }
+
+func (s *sqLiteStore[T]) done() { s.inflight.Done() }
 
 func requireKind(kind string) error {
 	if kind == "" {
@@ -219,6 +225,7 @@ func (s *sqLiteStore[T]) Get(ctx context.Context, kind, key string) (T, bool, er
 	if err := s.guardKind(ctx, kind); err != nil {
 		return zero, false, err
 	}
+	defer s.done()
 
 	var blob []byte
 	row := s.db.QueryRowContext(ctx, getQuery, kind, key)
@@ -239,6 +246,7 @@ func (s *sqLiteStore[T]) List(ctx context.Context, kind string, filter ...store.
 	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
+	defer s.done()
 
 	rows, err := s.db.QueryContext(ctx, listQuery, kind)
 	if err != nil {
@@ -275,6 +283,7 @@ func (s *sqLiteStore[T]) Count(ctx context.Context, kind string) (int, error) {
 	if err := s.guardKind(ctx, kind); err != nil {
 		return 0, err
 	}
+	defer s.done()
 
 	var n int
 	if err := s.db.QueryRowContext(ctx, countQuery, kind).Scan(&n); err != nil {
@@ -287,6 +296,7 @@ func (s *sqLiteStore[T]) Keys(ctx context.Context, kind string) ([]string, error
 	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
+	defer s.done()
 
 	rows, err := s.db.QueryContext(ctx, keysQuery, kind)
 	if err != nil {
@@ -309,6 +319,7 @@ func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyVa
 	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
+	defer s.done()
 
 	rows, err := s.db.QueryContext(ctx, valuesQuery, kind)
 	if err != nil {
@@ -336,6 +347,7 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (st
 	if err := s.guardKind(ctx, kind); err != nil {
 		return store.SetUnchanged, err
 	}
+	defer s.done()
 	if err := s.validate(kind, value); err != nil {
 		return store.SetUnchanged, err
 	}
@@ -413,6 +425,7 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 	if err := s.guardKind(ctx, kind); err != nil {
 		return false, err
 	}
+	defer s.done()
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -479,6 +492,7 @@ func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[st
 	if err := s.guardKind(ctx, kind); err != nil {
 		return err
 	}
+	defer s.done()
 	if len(values) == 0 {
 		return nil
 	}
@@ -605,6 +619,7 @@ func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T,
 	if err := s.guardKind(ctx, kind); err != nil {
 		return false, zero, err
 	}
+	defer s.done()
 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -648,6 +663,7 @@ func (s *sqLiteStore[T]) Watch(ctx context.Context, kind string, opts ...store.W
 	if err := s.guardKind(ctx, kind); err != nil {
 		return nil, err
 	}
+	defer s.done()
 
 	cfg := &store.WatchCfg[T]{}
 	for _, o := range opts {
@@ -702,6 +718,9 @@ func (s *sqLiteStore[T]) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 
+	// In-flight calls finish against an open database and return their real
+	// result. Anything that starts afterwards is rejected by guard.
+	s.inflight.Wait()
 	s.hub.Close()
 	return s.db.Close()
 }
@@ -711,6 +730,7 @@ func (s *sqLiteStore[T]) Dump(ctx context.Context, w io.Writer) error {
 	if err := s.guard(ctx); err != nil {
 		return err
 	}
+	defer s.done()
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT kind, key, value, version, updated_at FROM zestor_kv ORDER BY kind, key;`)
@@ -742,6 +762,7 @@ func (s *sqLiteStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, e
 	if err := s.guard(ctx); err != nil {
 		return nil, err
 	}
+	defer s.done()
 
 	rows, err := s.db.QueryContext(ctx, `SELECT kind, key, value FROM zestor_kv ORDER BY kind, key;`)
 	if err != nil {

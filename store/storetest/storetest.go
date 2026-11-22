@@ -117,6 +117,8 @@ func Run(t *testing.T, cfg Config) {
 		{"CloseClosesWatchers", testCloseClosesWatchers},
 		{"CloseRejectsOperations", testCloseRejectsOperations},
 		{"CloseIsIdempotent", testCloseIsIdempotent},
+		{"CloseDeliversErrClosed", testCloseDeliversErrClosed},
+		{"CloseRacesWithOperations", testCloseRacesWithOperations},
 
 		// --- optional Dumper ---------------------------------------------
 		{"DumperWritesEveryKey", testDumperWritesEveryKey},
@@ -988,6 +990,100 @@ func testCloseRejectsOperations(t *testing.T, cfg Config) {
 	defer cancel()
 	if _, err := s.Watch(wctx, "k"); !errors.Is(err, store.ErrClosed) {
 		t.Errorf("Watch after Close returned %v, want ErrClosed", err)
+	}
+}
+
+// A watcher blocked in receive must learn that the store shut down, and its
+// context must stay uncancelled so it can tell shutdown from its own cancel.
+// The type filter must not swallow the signal.
+func testCloseDeliversErrClosed(t *testing.T, cfg Config) {
+	s := cfg.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := s.Watch(ctx, "k", store.WithEventTypes[Value](store.EventTypeDelete))
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("channel closed without a terminal event")
+		}
+		if ev.EventType != store.EventTypeError || !errors.Is(ev.Err, store.ErrClosed) {
+			t.Fatalf("got %s (err %v), want a terminal ErrClosed", ev.EventType, ev.Err)
+		}
+	case <-time.After(cfg.eventDelay()):
+		t.Fatal("timed out waiting for ErrClosed")
+	}
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("channel stayed open after ErrClosed")
+		}
+	case <-time.After(cfg.eventDelay()):
+		t.Fatal("channel was not closed after ErrClosed")
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Close cancelled the watcher's context: %v", ctx.Err())
+	}
+}
+
+// An operation in flight when Close runs must finish cleanly or return
+// ErrClosed, never a driver error from a database that was closed underneath it.
+func testCloseRacesWithOperations(t *testing.T, cfg Config) {
+	s := cfg.New(t)
+	ctx := context.Background()
+	mustSet(t, s, "k", "a", Value{Name: "a", N: 1})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	errs := make(chan error, 1)
+	report := func(err error) {
+		if err == nil || errors.Is(err, store.ErrClosed) {
+			return
+		}
+		select {
+		case errs <- err:
+		default:
+		}
+	}
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, _, err := s.Get(ctx, "k", "a"); err != nil {
+					report(err)
+				}
+				if _, err := s.Set(ctx, "k", "b", Value{Name: "b", N: 1}); err != nil {
+					report(err)
+				}
+				if _, err := s.List(ctx, "k"); err != nil {
+					report(err)
+				}
+			}
+		}()
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	close(stop)
+	wg.Wait()
+	select {
+	case err := <-errs:
+		t.Errorf("operation racing Close returned %v, want success or ErrClosed", err)
+	default:
 	}
 }
 

@@ -240,6 +240,7 @@ func (s *sub[T]) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.stop:
+			s.reportClosed(ctx)
 			return
 		}
 	}
@@ -257,6 +258,7 @@ func (s *sub[T]) run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-s.stop:
+				s.reportClosed(ctx)
 				return
 			}
 		}
@@ -266,6 +268,7 @@ func (s *sub[T]) run(ctx context.Context) {
 			case s.ch <- &store.Event[T]{Kind: s.kind, EventType: store.EventTypeError, Err: store.ErrWatchOverflow}:
 			case <-ctx.Done():
 			case <-s.stop:
+				s.reportClosed(ctx)
 			}
 			return
 		}
@@ -275,7 +278,22 @@ func (s *sub[T]) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.stop:
+			s.reportClosed(ctx)
 			return
 		}
+	}
+}
+
+// reportClosed delivers ErrClosed to a consumer that is waiting for an event.
+// The send does not block. Close waits for run to return, so blocking here
+// would deadlock it against a consumer that is not reading; a consumer that is
+// waiting has room, because it has already taken whatever the channel held.
+func (s *sub[T]) reportClosed(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	select {
+	case s.ch <- &store.Event[T]{Kind: s.kind, EventType: store.EventTypeError, Err: store.ErrClosed}:
+	default:
 	}
 }

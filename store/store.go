@@ -100,8 +100,15 @@ type Writer[T any] interface {
 //     cancelled, when the watch overflows, or when the store is closed. The
 //     consumer can therefore range over it safely.
 //
-// The watch lives until ctx is cancelled; cancelling ctx is the only way for a
-// caller to unsubscribe.
+//     The three endings are distinguishable. Cancellation leaves ctx.Err()
+//     set and sends no event. Overflow sends a final EventTypeError carrying
+//     ErrWatchOverflow. Store closure does not cancel ctx; a consumer that is
+//     waiting receives a final EventTypeError carrying ErrClosed. A consumer
+//     that has not read an already-buffered event may observe only the close,
+//     because delivering ErrClosed must not block Close.
+//
+// The watch lives until ctx is cancelled or the store is closed; cancelling
+// ctx is the only way for a caller to unsubscribe.
 type Watcher[T any] interface {
 	Watch(ctx context.Context, kind string, opts ...WatchOption[T]) (<-chan *Event[T], error)
 }
@@ -117,6 +124,9 @@ type Store[T any] interface {
 	Reader[T]
 	Writer[T]
 	Watcher[T]
+	// Close shuts the store down and is idempotent. An operation that has
+	// already started runs to completion; one that starts afterwards returns
+	// ErrClosed. Close does not cancel watcher contexts.
 	Close() error
 }
 
