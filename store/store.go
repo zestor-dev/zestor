@@ -18,6 +18,11 @@ var (
 	// incomplete at that point and must be rebuilt by re-listing and
 	// re-watching. See the Watcher contract below.
 	ErrWatchOverflow = errors.New("watch overflow: consumer fell behind, re-list required")
+
+	// ErrDecode terminates a watch when a stored value cannot be decoded. The
+	// events queued ahead of the bad one are delivered first. The consumer's
+	// view is incomplete and must be rebuilt by re-listing and re-watching.
+	ErrDecode = errors.New("watch decode: stored value could not be decoded, re-list required")
 )
 
 // Reader provides read-only access to the store.
@@ -106,12 +111,14 @@ type Writer[T any] interface {
 //     cancelled, when the watch overflows, or when the store is closed. The
 //     consumer can therefore range over it safely.
 //
-//     The three endings are distinguishable. Cancellation leaves ctx.Err()
-//     set and sends no event. Overflow sends a final EventTypeError carrying
-//     ErrWatchOverflow. Store closure does not cancel ctx; a consumer that is
-//     waiting receives a final EventTypeError carrying ErrClosed. A consumer
-//     that has not read an already-buffered event may observe only the close,
-//     because delivering ErrClosed must not block Close.
+//     The endings are distinguishable. Cancellation leaves ctx.Err() set and
+//     sends no event. Overflow sends a final EventTypeError carrying
+//     ErrWatchOverflow. A stored value that cannot be decoded sends
+//     ErrDecode, after the events queued ahead of it. Store closure does not
+//     cancel ctx; a consumer that is waiting receives a final EventTypeError
+//     carrying ErrClosed. A consumer that has not read an already-buffered
+//     event may observe only the close, because delivering ErrClosed must not
+//     block Close.
 //
 // The watch lives until ctx is cancelled or the store is closed; cancelling
 // ctx is the only way for a caller to unsubscribe.

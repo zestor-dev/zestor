@@ -447,6 +447,90 @@ func TestSetSurvivesConcurrentDelete(t *testing.T) {
 	}
 }
 
+// A row that cannot be decoded used to pin the outbox cursor: the drain
+// retried it forever and every later Watch on the kind failed. The row is
+// skipped, current watchers are told, and a new watch still receives later
+// writes. The type filter must not hide the terminal error.
+func TestUndecodableOutboxRowDoesNotStallKind(t *testing.T) {
+	ctx := context.Background()
+	ns := nextNamespace()
+	s := newStore[TestData](t, ns)
+	defer s.Close()
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch, err := s.Watch(watchCtx, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletes, err := s.Watch(watchCtx, "k", store.WithEventTypes[TestData](store.EventTypeDelete))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Set(ctx, "k", "good", TestData{Name: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Err != nil || ev.Name != "good" {
+			t.Fatalf("got %s %q (err %v), want the good write", ev.EventType, ev.Name, ev.Err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the good write was never delivered")
+	}
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO zestor_outbox(ns_id, kind, key, etype, value) VALUES($1, 'k', 'bad', 'update', $2)`,
+		ns, []byte{0xff}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sub := range []<-chan *store.Event[TestData]{ch, deletes} {
+		select {
+		case ev, ok := <-sub:
+			if !ok || !errors.Is(ev.Err, store.ErrDecode) {
+				t.Fatalf("terminal event: ok=%v err=%v", ok, ev.Err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the undecodable row did not end the watch")
+		}
+		select {
+		case _, ok := <-sub:
+			if ok {
+				t.Fatal("channel stayed open after ErrDecode")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("channel was not closed after ErrDecode")
+		}
+	}
+
+	again, cancelAgain := context.WithCancel(ctx)
+	defer cancelAgain()
+	ch2, err := s.Watch(again, "k")
+	if err != nil {
+		t.Fatalf("Watch after the bad row: %v", err)
+	}
+	if _, err := s.Set(ctx, "k", "after", TestData{Name: "after"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev, ok := <-ch2:
+		if !ok {
+			t.Fatal("watch closed before the write after the bad row")
+		}
+		if ev.Err != nil || ev.Name != "after" {
+			t.Fatalf("got %s %q (err %v), want the write after the bad row", ev.EventType, ev.Name, ev.Err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a write after the bad row was never delivered: the kind is still stuck")
+	}
+}
+
 func TestDumpIncludesVersion(t *testing.T) {
 	ctx := context.Background()
 	s := newStore[TestData](t, nextNamespace())

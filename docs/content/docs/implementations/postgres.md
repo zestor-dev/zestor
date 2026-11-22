@@ -106,7 +106,7 @@ Exact DDL is applied inside `New`; you normally do not manage these tables by ha
 - `store.WithBufferSize[T](n)`
 
 {{% alert title="Delivery model" color="info" %}}
-Events are delivered after the transaction commits and the listener drains the outbox. Latency is usually low but not synchronous with the `Set` return in the same goroutine.
+Events are delivered after the transaction commits and the listener drains the outbox. Latency is usually low but not synchronous with the `Set` return in the same goroutine. An outbox row that cannot be decoded is skipped, and every current watcher of that kind receives a final `ErrDecode` and must re-list. A later watch is not stuck on that row.
 {{% /alert %}}
 
 ## Codecs
