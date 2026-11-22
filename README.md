@@ -20,8 +20,10 @@ A generic, type-safe, in-memory key-value store for Go with watch/subscribe capa
 |---|---|---|---|
 | Persistence | — | ✅ | ✅ |
 | Cross-process watch | — | — | ✅ |
-| Per-kind validation (`ValidateFns`) | ✅ | — | — |
-| Custom change detection (`CompareFn`) | ✅ | — | — |
+| Per-kind validation (`ValidateFns`) | ✅ | ✅ | — |
+| Custom change detection (`CompareFn`) | ✅ | ✅ | — |
+
+`sqlite` takes these through `sqlite.NewWithStoreOptions`.
 
 ## Requirements
 

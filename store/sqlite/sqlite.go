@@ -77,6 +77,11 @@ type sqLiteStore[T any] struct {
 	writeMu sync.Mutex
 	hub     *watchhub.Hub[T]
 
+	validateFns map[string]store.ValidateFunc[T]
+	// compareFn is nil unless the caller supplied one; writes then compare the
+	// encoded bytes, which avoids decoding the stored value.
+	compareFn store.CompareFunc[T]
+
 	// closed flag
 	mu     sync.RWMutex
 	closed bool
@@ -84,6 +89,14 @@ type sqLiteStore[T any] struct {
 
 // New creates/opens the DB, applies the schema, and returns a Store[T].
 func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
+	return NewWithStoreOptions(ctx, o, store.StoreOptions[T]{})
+}
+
+// NewWithStoreOptions is New with per-kind validation and custom change
+// detection. Without a CompareFn, a write is unchanged when its encoding is
+// byte-for-byte equal to the stored one; with one, the stored value is decoded
+// and CompareFn decides.
+func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOptions[T]) (store.Store[T], error) {
 	if o.DSN == "" {
 		return nil, errors.New("sqlite: Options.DSN is required")
 	}
@@ -129,10 +142,32 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 	}
 
 	return &sqLiteStore[T]{
-		db:    db,
-		codec: o.Codec,
-		hub:   watchhub.New[T](),
+		db:          db,
+		codec:       o.Codec,
+		hub:         watchhub.New[T](),
+		validateFns: maps.Clone(so.ValidateFns),
+		compareFn:   so.CompareFn,
 	}, nil
+}
+
+func (s *sqLiteStore[T]) validate(kind string, v T) error {
+	if fn, ok := s.validateFns[kind]; ok {
+		return fn(v)
+	}
+	return nil
+}
+
+// unchanged reports whether writing next, encoded as enc, over the stored
+// encoding cur would change nothing.
+func (s *sqLiteStore[T]) unchanged(cur, enc []byte, next T) (bool, error) {
+	if s.compareFn == nil {
+		return bytes.Equal(cur, enc), nil
+	}
+	var prev T
+	if err := s.codec.Unmarshal(cur, &prev); err != nil {
+		return false, err
+	}
+	return s.compareFn(prev, next), nil
 }
 
 // isMemoryDSN reports whether dsn names an in-memory database: ":memory:",
@@ -286,6 +321,9 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (st
 	if err := s.guard(ctx); err != nil {
 		return store.SetUnchanged, err
 	}
+	if err := s.validate(kind, value); err != nil {
+		return store.SetUnchanged, err
+	}
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
@@ -326,7 +364,11 @@ func (s *sqLiteStore[T]) Set(ctx context.Context, kind, key string, value T) (st
 		if err := tx.QueryRowContext(ctx, getQuery, kind, key).Scan(&cur); err != nil {
 			return store.SetUnchanged, err
 		}
-		if bytes.Equal(cur, enc) {
+		same, err := s.unchanged(cur, enc, value)
+		if err != nil {
+			return store.SetUnchanged, err
+		}
+		if same {
 			if err := tx.Commit(); err != nil {
 				return store.SetUnchanged, err
 			}
@@ -387,11 +429,18 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 	if err != nil {
 		return false, err
 	}
+	if err := s.validate(kind, nv); err != nil {
+		return false, err
+	}
 	newBytes, err := s.codec.Marshal(nv)
 	if err != nil {
 		return false, err
 	}
-	if bytes.Equal(curBytes, newBytes) {
+	same := bytes.Equal(curBytes, newBytes)
+	if s.compareFn != nil {
+		same = s.compareFn(cur, nv)
+	}
+	if same {
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -414,6 +463,13 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 func (s *sqLiteStore[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	if err := s.guard(ctx); err != nil {
 		return err
+	}
+	// Validate the whole batch before touching the database, so a rejected
+	// batch writes nothing.
+	for _, k := range slices.Sorted(maps.Keys(values)) {
+		if err := s.validate(kind, values[k]); err != nil {
+			return err
+		}
 	}
 
 	s.writeMu.Lock()
@@ -458,8 +514,14 @@ ON CONFLICT(kind,key) DO UPDATE SET
 			return err
 		}
 		prev, existed := existing[k]
-		if existed && bytes.Equal(prev, enc) {
-			continue
+		if existed {
+			same, err := s.unchanged(prev, enc, v)
+			if err != nil {
+				return err
+			}
+			if same {
+				continue
+			}
 		}
 		if _, err := stmtIns.ExecContext(ctx, kind, k, enc); err != nil {
 			return err

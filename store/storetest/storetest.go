@@ -1007,6 +1007,33 @@ func testValidationRejectsWrites(t *testing.T, cfg Config) {
 	if _, err := s.Set(ctx, "other", "bad", Value{}); err != nil {
 		t.Errorf("validation leaked into an unregistered kind: %v", err)
 	}
+
+	// One invalid value rejects the whole batch: nothing from it is written.
+	err := s.SetMany(ctx, "k", map[string]Value{
+		"batch-good": {Name: "fine"},
+		"batch-bad":  {},
+	})
+	if !errors.Is(err, sentinel) {
+		t.Errorf("SetMany containing an invalid value returned %v, want the validation error", err)
+	}
+	if _, ok, _ := s.Get(ctx, "k", "batch-good"); ok {
+		t.Error("SetMany persisted part of a batch that failed validation")
+	}
+
+	// The transform's result is what gets validated.
+	changed, err := s.SetFn(ctx, "k", "ok", func(v Value) (Value, error) {
+		v.Name = ""
+		return v, nil
+	})
+	if !errors.Is(err, sentinel) {
+		t.Errorf("SetFn producing an invalid value returned %v, want the validation error", err)
+	}
+	if changed {
+		t.Error("SetFn reported changed=true after validation failed")
+	}
+	if got, _, _ := s.Get(ctx, "k", "ok"); got.Name != "fine" {
+		t.Errorf("SetFn persisted an invalid value: %+v", got)
+	}
 }
 
 func testCompareFnSuppressesUpdates(t *testing.T, cfg Config) {
@@ -1018,11 +1045,37 @@ func testCompareFnSuppressesUpdates(t *testing.T, cfg Config) {
 		CompareFn: func(prev, next Value) bool { return prev.Name == next.Name },
 	})
 	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
 	mustSet(t, s, "k", "a", Value{Name: "a", N: 1})
 
 	ch := watchCtx(t, cfg, s, "k")
-	if _, err := s.Set(context.Background(), "k", "a", Value{Name: "a", N: 2}); err != nil {
+	res, err := s.Set(ctx, "k", "a", Value{Name: "a", N: 2})
+	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
+	if res != store.SetUnchanged {
+		t.Errorf("Set equal under CompareFn reported %v, want unchanged", res)
+	}
+	if err := s.SetMany(ctx, "k", map[string]Value{"a": {Name: "a", N: 3}}); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+	changed, err := s.SetFn(ctx, "k", "a", func(v Value) (Value, error) {
+		v.N = 4
+		return v, nil
+	})
+	if err != nil {
+		t.Fatalf("SetFn: %v", err)
+	}
+	if changed {
+		t.Error("SetFn equal under CompareFn reported changed=true")
+	}
 	expectNoEvent(t, cfg, ch)
+
+	// A change CompareFn does consider significant is still a change.
+	if res, err := s.Set(ctx, "k", "a", Value{Name: "b", N: 1}); err != nil || res != store.SetUpdated {
+		t.Errorf("Set different under CompareFn returned %v, %v; want updated", res, err)
+	}
+	if ev := recv(t, cfg, ch); ev.EventType != store.EventTypeUpdate || ev.Object.Name != "b" {
+		t.Errorf("got %s %+v, want an update to Name=b", ev.EventType, ev.Object)
+	}
 }

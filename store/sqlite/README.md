@@ -22,7 +22,7 @@ go get github.com/zestor-dev/zestor/store/sqlite
 ## Usage
 
 ```go
-s, err := sqlite.New[MyData](sqlite.Options{
+s, err := sqlite.New[MyData](ctx, sqlite.Options{
     DSN:         "file:zestor.db",
     Codec:       &codec.JSON{},
     BusyTimeout: 5 * time.Second,    // optional
@@ -56,6 +56,10 @@ type Options struct {
     DisableWAL  bool          // Disable WAL mode (optional)
 }
 ```
+
+For per-kind validation (`ValidateFns`) and custom change detection
+(`CompareFn`), use `sqlite.NewWithStoreOptions(ctx, opts, store.StoreOptions[T]{...})`.
+Without a `CompareFn`, unchanged means byte-for-byte equal encodings.
 
 ### DSN Examples
 
@@ -140,7 +144,7 @@ type Config struct {
 }
 
 func main() {
-    s, _ := sqlite.New[Config](sqlite.Options{
+    s, _ := sqlite.New[Config](ctx, sqlite.Options{
         DSN:   "file:config.db",
         Codec: &codec.JSON{},
     })

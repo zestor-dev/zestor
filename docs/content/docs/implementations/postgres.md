@@ -38,7 +38,7 @@ type User struct {
 }
 
 func main() {
-    s, err := postgres.New[User](postgres.Options{
+    s, err := postgres.New[User](ctx, postgres.Options{
         ConnString: "postgresql://user:pass@localhost:5432/mydb?sslmode=disable",
         Codec:      &codec.JSON{},
         Timeout:    10 * time.Second,
@@ -120,7 +120,7 @@ Same as SQLite: pass any `codec.Codec` ([Codecs](/docs/concepts/codec/) — JSON
 | Outbox growth | Plan retention / compaction |
 | Write concurrency | Writes to one namespace are serialised (a transaction-level advisory lock, across all processes) so that watchers see every committed write in order. Reads are unaffected; use separate namespaces to scale independent write traffic. A `SetFn` transform runs while that lock is held, so keep it short |
 | `SetFn` | Requires existing key (`ErrKeyNotFound` otherwise), like `sqlite` / `gomap` |
-| Validation / compare hooks | Not supported (same as `sqlite`) |
+| Validation / compare hooks | Not supported yet (`sqlite` and `gomap` support them) |
 
 ## Testing
 
