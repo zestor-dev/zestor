@@ -95,7 +95,7 @@ The store creates (if missing):
 - **`zestor_outbox`**: append-only rows with `etype` in `create` / `update` / `delete`
 - **Trigger** on `zestor_outbox` → `pg_notify('zestor_events_v2', '<ns_id>|<kind>')`. The payload deliberately omits the key, so keys of any content or length are safe; only a kind approaching 8000 bytes would exceed PostgreSQL's NOTIFY limit
 
-Exact DDL is applied inside `New`; you normally do not manage these tables by hand except for **outbox retention** (delete aged rows in production).
+Exact DDL is applied inside `New`. Once the tables and the notify trigger exist, opening another store does not rebuild them, so it does not lock writers. You normally do not manage these tables by hand except for **outbox retention** (delete aged rows in production).
 
 ## Watch
 

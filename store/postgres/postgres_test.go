@@ -111,6 +111,104 @@ type TestData struct {
 	Value int    `json:"value"`
 }
 
+// Opening a store must not take an exclusive lock on the outbox. A session
+// that is only reading (ACCESS SHARE, what a plain SELECT holds) has to keep
+// writers moving, and New used to DROP TRIGGER on every start, which waits
+// for that lock and then blocks every writer.
+func TestNewDoesNotLockOutbox(t *testing.T) {
+	ctx := context.Background()
+	existing := newStore[TestData](t, nextNamespace())
+	existing.Close()
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `LOCK TABLE zestor_outbox IN ACCESS SHARE MODE`); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		openCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		s, err := postgres.New[TestData](openCtx, postgres.Options{
+			ConnString: getPostgresConn(),
+			Codec:      &codec.JSON{},
+			Namespace:  nextNamespace(),
+			Timeout:    2 * time.Second,
+		})
+		if s != nil {
+			s.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("New while a reader holds the outbox: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("New blocked behind an ACCESS SHARE lock, so it is still taking an exclusive lock")
+	}
+}
+
+// An older process installs the unversioned trigger, which breaks long keys.
+// Starting a current store removes it and leaves the v2 trigger in place.
+func TestNewReplacesLegacyTrigger(t *testing.T) {
+	ctx := context.Background()
+	s := newStore[TestData](t, nextNamespace())
+	s.Close()
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	for _, q := range []string{
+		`CREATE OR REPLACE FUNCTION zestor_notify() RETURNS TRIGGER AS $$ BEGIN
+		   PERFORM pg_notify('zestor_events', NEW.ns_id::text); RETURN NEW; END; $$ LANGUAGE plpgsql;`,
+		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify ON zestor_outbox;`,
+		`CREATE TRIGGER trg_zestor_outbox_notify AFTER INSERT ON zestor_outbox
+		   FOR EACH ROW EXECUTE PROCEDURE zestor_notify();`,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	current := newStore[TestData](t, nextNamespace())
+	current.Close()
+
+	rows, err := conn.Query(ctx, `
+SELECT tgname FROM pg_trigger
+ WHERE tgrelid = 'zestor_outbox'::regclass AND NOT tgisinternal`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "trg_zestor_outbox_notify_v2" {
+		t.Fatalf("triggers = %v, want only trg_zestor_outbox_notify_v2", names)
+	}
+}
+
 func TestNewValidatesOptions(t *testing.T) {
 	ctx := context.Background()
 

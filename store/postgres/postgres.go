@@ -27,6 +27,11 @@ const (
 
 	// notifyChannel is the LISTEN/NOTIFY channel fed by zestor_notify_v2.
 	notifyChannel = "zestor_events_v2"
+
+	// schemaLockID serialises ensureSchema across processes. It is a
+	// single-bigint advisory lock, a different space from the two-key lock
+	// that serialises writes, so the two never block each other.
+	schemaLockID int64 = 0x7a65737400000002
 )
 
 type Options struct {
@@ -225,6 +230,13 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		_ = tx.Rollback(ctx)
 	}()
 
+	// First, before any table lock. Two stores starting together used to race
+	// on CREATE TABLE, and rebuilding the trigger on every start took an
+	// exclusive lock that blocked writers for the whole statement.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, schemaLockID); err != nil {
+		return err
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS zestor_kv (
 		   ns_id      BIGINT  NOT NULL DEFAULT 0,
@@ -241,7 +253,7 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		   id     BIGSERIAL PRIMARY KEY,
 		   ns_id  BIGINT NOT NULL,
 		   kind   TEXT   NOT NULL,
-		   key    TEXT   NOT NULL,
+		   key        TEXT    NOT NULL,
 		   etype  TEXT   NOT NULL CHECK (etype IN ('create','update','delete')),
 		   value  BYTEA,
 		   at     TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -249,38 +261,65 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_outbox_kind ON zestor_outbox(ns_id, kind, id);`,
 
 		// The payload carries only what the listener needs to pick a drain, kind
-		// last so it may contain anything. Keys used to be included too, which
-		// broke parsing on a '|' and made long keys exceed pg_notify's
-		// 8000-byte limit, failing the write.
-		//
-		// The function, trigger and channel are versioned rather than replaced
-		// in place: New re-installs them on every start, so during a rolling
-		// upgrade an old instance would otherwise put back a payload format the
-		// new ones cannot parse.
+		// last so it may contain anything. Replacing the function does not lock
+		// the outbox. The trigger is created only when it is missing: dropping
+		// it on every start takes an exclusive lock and blocks writers.
 		`CREATE OR REPLACE FUNCTION zestor_notify_v2() RETURNS TRIGGER AS $$
 		   BEGIN
 		     PERFORM pg_notify('` + notifyChannel + `', NEW.ns_id::text || '|' || NEW.kind);
 		     RETURN NEW;
 		   END; $$ LANGUAGE plpgsql;`,
-
-		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify_v2 ON zestor_outbox;`,
-		`CREATE TRIGGER trg_zestor_outbox_notify_v2
-		   AFTER INSERT ON zestor_outbox
-		   FOR EACH ROW EXECUTE PROCEDURE zestor_notify_v2();`,
-
-		// The unversioned trigger still raises "payload string too long" on
-		// long keys, so it must not outlive the upgrade.
-		`DROP TRIGGER IF EXISTS trg_zestor_outbox_notify ON zestor_outbox;`,
-		`DROP FUNCTION IF EXISTS zestor_notify();`,
 	}
-
 	for _, q := range stmts {
 		if _, err := tx.Exec(ctx, q); err != nil {
 			return err
 		}
 	}
 
+	names, err := triggerNames(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if _, ok := names["trg_zestor_outbox_notify_v2"]; !ok {
+		if _, err := tx.Exec(ctx, `
+CREATE TRIGGER trg_zestor_outbox_notify_v2
+   AFTER INSERT ON zestor_outbox
+   FOR EACH ROW EXECUTE PROCEDURE zestor_notify_v2()`); err != nil {
+			return err
+		}
+	}
+	// The unversioned trigger still fails writes whose key is long, so drop it
+	// when an older process left it behind. Absent, this is a no-op and takes
+	// no lock.
+	if _, ok := names["trg_zestor_outbox_notify"]; ok {
+		if _, err := tx.Exec(ctx, `DROP TRIGGER trg_zestor_outbox_notify ON zestor_outbox`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DROP FUNCTION IF EXISTS zestor_notify()`); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit(ctx)
+}
+
+func triggerNames(ctx context.Context, tx pgx.Tx) (map[string]struct{}, error) {
+	rows, err := tx.Query(ctx, `
+SELECT tgname FROM pg_trigger
+ WHERE tgrelid = to_regclass('zestor_outbox') AND NOT tgisinternal`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]struct{}{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names[name] = struct{}{}
+	}
+	return names, rows.Err()
 }
 
 func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error) {
