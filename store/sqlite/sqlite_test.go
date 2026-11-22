@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -101,6 +102,94 @@ func newStore(t *testing.T, path string) store.Store[Note] {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// SetMany looks up existing values in chunks. A batch spanning several chunks,
+// mixing new, changed and unchanged keys, must still classify every key
+// exactly as a single Set would.
+func TestSetManyAcrossLookupChunks(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t, dsn(t))
+
+	const n = 1201
+	seed := map[string]Note{}
+	for i := 0; i < n; i += 2 {
+		seed[fmt.Sprintf("k%04d", i)] = Note{Title: "seed", N: i}
+	}
+	if err := s.SetMany(ctx, "k", seed); err != nil {
+		t.Fatalf("seed SetMany: %v", err)
+	}
+
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ch, err := s.Watch(watchCtx, "k", store.WithBufferSize[Note](2*n))
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	// Odd keys are new; even keys divisible by 4 change; other even keys are
+	// written back unchanged.
+	batch := map[string]Note{}
+	wantCreates, wantUpdates := 0, 0
+	for i := range n {
+		k := fmt.Sprintf("k%04d", i)
+		switch {
+		case i%2 == 1:
+			batch[k] = Note{Title: "new", N: i}
+			wantCreates++
+		case i%4 == 0:
+			batch[k] = Note{Title: "changed", N: i}
+			wantUpdates++
+		default:
+			batch[k] = seed[k]
+		}
+	}
+	if err := s.SetMany(ctx, "k", batch); err != nil {
+		t.Fatalf("SetMany: %v", err)
+	}
+
+	creates, updates := 0, 0
+	for range wantCreates + wantUpdates {
+		select {
+		case ev := <-ch:
+			switch ev.EventType {
+			case store.EventTypeCreate:
+				creates++
+			case store.EventTypeUpdate:
+				updates++
+			default:
+				t.Fatalf("unexpected %s event for %s (err %v)", ev.EventType, ev.Name, ev.Err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out after %d creates and %d updates", creates, updates)
+		}
+	}
+	if creates != wantCreates || updates != wantUpdates {
+		t.Errorf("got %d creates and %d updates, want %d and %d", creates, updates, wantCreates, wantUpdates)
+	}
+	select {
+	case ev := <-ch:
+		t.Errorf("unexpected extra %s event for %s: an unchanged key was rewritten", ev.EventType, ev.Name)
+	case <-time.After(250 * time.Millisecond):
+	}
+	if c, _ := s.Count(ctx, "k"); c != n {
+		t.Errorf("Count=%d, want %d", c, n)
+	}
+}
+
+func TestSetManyEmpty(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.New[Note](ctx, sqlite.Options{DSN: dsn(t), Codec: &codec.JSON{}})
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	if err := s.SetMany(ctx, "k", nil); err != nil {
+		t.Errorf("empty SetMany returned %v", err)
+	}
+	_ = s.Close()
+	if err := s.SetMany(ctx, "k", nil); !errors.Is(err, store.ErrClosed) {
+		t.Errorf("empty SetMany on a closed store returned %v, want ErrClosed", err)
+	}
 }
 
 func TestNewValidatesOptions(t *testing.T) {
