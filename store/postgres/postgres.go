@@ -56,11 +56,15 @@ type Options struct {
 }
 
 type storePG[T any] struct {
-	pool      *pgxpool.Pool
-	codec     codec.Codec
-	ns        int64
-	timeout   time.Duration
-	retention time.Duration
+	pool        *pgxpool.Pool
+	codec       codec.Codec
+	ns          int64
+	timeout     time.Duration
+	retention   time.Duration
+	validateFns map[string]store.ValidateFunc[T]
+	// compareFn is nil unless the caller supplied one. Writes then decode the
+	// stored value and let CompareFn decide; otherwise equality is the bytes.
+	compareFn store.CompareFunc[T]
 
 	// hub is fed by the drain loop, which reads the outbox in id order.
 	// Publication therefore needs no extra write lock here; the hub lock alone
@@ -109,6 +113,14 @@ type storePG[T any] struct {
 
 // New opens a pool, ensures schema, starts the LISTEN loop, and returns a Store[T].
 func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
+	return NewWithStoreOptions(ctx, o, store.StoreOptions[T]{})
+}
+
+// NewWithStoreOptions is New with per-kind validation and custom change
+// detection. Without a CompareFn, a write is unchanged when its encoding is
+// byte-for-byte equal to the stored one. With one, the stored value is decoded
+// and CompareFn decides, which costs a decode per write to an existing key.
+func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOptions[T]) (store.Store[T], error) {
 	if o.ConnString == "" {
 		return nil, errors.New("postgres: ConnString required")
 	}
@@ -139,6 +151,8 @@ func New[T any](ctx context.Context, o Options) (store.Store[T], error) {
 		ns:           o.Namespace,
 		timeout:      o.Timeout,
 		retention:    o.OutboxRetention,
+		validateFns:  maps.Clone(so.ValidateFns),
+		compareFn:    so.CompareFn,
 		hub:          watchhub.New[T](),
 		cursors:      make(map[string]*kindCursor),
 		draining:     make(map[string]*drainState),
@@ -257,6 +271,26 @@ func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
 	// Written before the listen goroutine starts, and never written again.
 	s.startID = maxID
 	return nil
+}
+
+func (s *storePG[T]) validate(kind string, v T) error {
+	if fn, ok := s.validateFns[kind]; ok {
+		return fn(v)
+	}
+	return nil
+}
+
+// unchanged reports whether writing next over the stored encoding cur would
+// change nothing. CompareFn sees the decoded stored value.
+func (s *storePG[T]) unchanged(cur, enc []byte, next T) (bool, error) {
+	if s.compareFn == nil {
+		return bytes.Equal(cur, enc), nil
+	}
+	var prev T
+	if err := s.codec.Unmarshal(cur, &prev); err != nil {
+		return false, err
+	}
+	return s.compareFn(prev, next), nil
 }
 
 // kindCursor is one kind's drain lock and outbox cursor.
@@ -590,6 +624,9 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.
 		return store.SetUnchanged, err
 	}
 	defer cancel()
+	if err := s.validate(kind, value); err != nil {
+		return store.SetUnchanged, err
+	}
 
 	enc, err := s.codec.Marshal(value)
 	if err != nil {
@@ -602,6 +639,9 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := s.lockOutbox(ctx, tx); err != nil {
 		return store.SetUnchanged, err
+	}
+	if s.compareFn != nil {
+		return s.setCompared(ctx, tx, kind, key, value, enc)
 	}
 
 	// One statement, so a delete cannot remove the row between the insert and
@@ -644,6 +684,57 @@ RETURNING (etype = 'create')
 	return store.SetUpdated, nil
 }
 
+// setCompared applies CompareFn. Byte equality is the wrong test here: a value
+// can compare equal with different bytes, and that must not be written.
+func (s *storePG[T]) setCompared(ctx context.Context, tx pgx.Tx, kind, key string, value T, enc []byte) (store.SetResult, error) {
+	var cur []byte
+	err := tx.QueryRow(ctx, `
+SELECT value FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2 AND key=$3 FOR UPDATE`,
+		s.ns, kind, key).Scan(&cur)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := tx.Exec(ctx, `
+INSERT INTO zestor_kv(ns_id, kind, key, value) VALUES ($1,$2,$3,$4)`,
+			s.ns, kind, key, enc); err != nil {
+			return store.SetUnchanged, err
+		}
+		if err := s.appendOutbox(ctx, tx, kind, key, store.EventTypeCreate, enc); err != nil {
+			return store.SetUnchanged, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return store.SetUnchanged, err
+		}
+		return store.SetCreated, nil
+	}
+	if err != nil {
+		return store.SetUnchanged, err
+	}
+	same, err := s.unchanged(cur, enc, value)
+	if err != nil {
+		return store.SetUnchanged, err
+	}
+	if same {
+		if err := tx.Commit(ctx); err != nil {
+			return store.SetUnchanged, err
+		}
+		return store.SetUnchanged, nil
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE zestor_kv
+   SET value=$4, version=version+1, updated_at=now()
+ WHERE ns_id=$1 AND kind=$2 AND key=$3`,
+		s.ns, kind, key, enc); err != nil {
+		return store.SetUnchanged, err
+	}
+	if err := s.appendOutbox(ctx, tx, kind, key, store.EventTypeUpdate, enc); err != nil {
+		return store.SetUnchanged, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.SetUnchanged, err
+	}
+	return store.SetUpdated, nil
+}
+
 func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
 	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
@@ -679,11 +770,18 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 	if err != nil {
 		return false, err
 	}
+	if err := s.validate(kind, nv); err != nil {
+		return false, err
+	}
 	newBytes, err := s.codec.Marshal(nv)
 	if err != nil {
 		return false, err
 	}
-	if bytes.Equal(curBytes, newBytes) {
+	same := bytes.Equal(curBytes, newBytes)
+	if s.compareFn != nil {
+		same = s.compareFn(cur, nv)
+	}
+	if same {
 		if err := tx.Commit(ctx); err != nil {
 			return false, err
 		}
@@ -725,6 +823,22 @@ INSERT INTO zestor_outbox(ns_id, kind, key, etype, value)
 SELECT $1, kind, key, CASE WHEN created THEN 'create' ELSE 'update' END, value
 FROM upsert`
 
+// setManyForceStmt is setManyStmt without the byte guard. CompareFn has already
+// decided the value changed, which can be true even when the bytes match.
+const setManyForceStmt = `
+WITH upsert AS (
+    INSERT INTO zestor_kv(ns_id, kind, key, value)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (ns_id, kind, key) DO UPDATE
+        SET value = EXCLUDED.value,
+            version = zestor_kv.version + 1,
+            updated_at = now()
+    RETURNING kind, key, value, (version = 1) AS created
+)
+INSERT INTO zestor_outbox(ns_id, kind, key, etype, value)
+SELECT $1, kind, key, CASE WHEN created THEN 'create' ELSE 'update' END, value
+FROM upsert`
+
 func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string]T) error {
 	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {
@@ -735,6 +849,11 @@ func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string
 		return nil
 	}
 	keys := slices.Sorted(maps.Keys(values))
+	for _, k := range keys {
+		if err := s.validate(kind, values[k]); err != nil {
+			return err
+		}
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -759,10 +878,20 @@ func (s *storePG[T]) SetMany(ctx context.Context, kind string, values map[string
 		if err != nil {
 			return err
 		}
-		if prev, existed := existing[k]; existed && bytes.Equal(prev, b) {
-			continue
+		if prev, existed := existing[k]; existed {
+			same, err := s.unchanged(prev, b, values[k])
+			if err != nil {
+				return err
+			}
+			if same {
+				continue
+			}
 		}
-		batch.Queue(setManyStmt, s.ns, kind, k, b)
+		stmt := setManyStmt
+		if s.compareFn != nil {
+			stmt = setManyForceStmt
+		}
+		batch.Queue(stmt, s.ns, kind, k, b)
 	}
 	if batch.Len() == 0 {
 		return tx.Commit(ctx)

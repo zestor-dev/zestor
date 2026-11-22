@@ -81,6 +81,8 @@ type Options struct {
 }
 ```
 
+`NewWithStoreOptions` accepts the same `store.StoreOptions` as `gomap` and `sqlite`: per-kind `ValidateFns` and a `CompareFn`. Validators run on `Set`, on every value of a `SetMany` before anything is written, and on the result of a `SetFn`. Without a `CompareFn`, a write is unchanged when its encoding matches the stored bytes. With one, the stored value is decoded and `CompareFn` decides.
+
 ### Connection strings
 
 Use any DSN accepted by pgx, for example:
@@ -121,7 +123,7 @@ Same as SQLite: pass any `codec.Codec` ([Codecs](/docs/concepts/codec/) — JSON
 | Outbox growth | Set `OutboxRetention`, or delete aged rows yourself |
 | Write concurrency | Writes to one namespace are serialised (a transaction-level advisory lock, across all processes) so that watchers see every committed write in order. Reads are unaffected; use separate namespaces to scale independent write traffic. A `SetFn` transform runs while that lock is held, so keep it short |
 | `SetFn` | Requires existing key (`ErrKeyNotFound` otherwise), like `sqlite` / `gomap` |
-| Validation / compare hooks | Not supported yet (`sqlite` and `gomap` support them) |
+| Validation / compare hooks | `NewWithStoreOptions`, same as `sqlite` and `gomap` |
 
 ## Testing
 

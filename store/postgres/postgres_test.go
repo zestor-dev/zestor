@@ -93,9 +93,18 @@ func TestConformance(t *testing.T) {
 		New: func(t *testing.T) store.Store[storetest.Value] {
 			return newStore[storetest.Value](t, nextNamespace())
 		},
-		// NewWithOptions is deliberately omitted: postgres does not accept
-		// store.StoreOptions, so the validation and compare cases skip. See
-		// FIX-PLAN X3.
+		NewWithOptions: func(t *testing.T, so store.StoreOptions[storetest.Value]) store.Store[storetest.Value] {
+			s, err := postgres.NewWithStoreOptions(context.Background(), postgres.Options{
+				ConnString: getPostgresConn(),
+				Codec:      &codec.JSON{},
+				Namespace:  nextNamespace(),
+				Timeout:    30 * time.Second,
+			}, so)
+			if err != nil {
+				reportPostgresErr(t, err)
+			}
+			return s
+		},
 		//
 		// Events reach watchers through a commit, a NOTIFY and an outbox drain,
 		// so the delays are far more generous than for the in-process backends.

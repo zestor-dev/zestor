@@ -90,8 +90,8 @@ func NewStore(cfg Config) (store.Store[User], error) {
 |---------|-------|--------|----------|
 | Thread-safe | ✅ | ✅ | ✅ |
 | Watch/Subscribe | ✅ | ✅ (in-process) | ✅ (cross-process via NOTIFY + outbox) |
-| Validation hooks | ✅ | ✅ (`NewWithStoreOptions`) | ❌ |
-| Compare function | ✅ | ✅ (`NewWithStoreOptions`; default: byte comparison) | ❌ (byte comparison) |
+| Validation hooks | ✅ | ✅ (`NewWithStoreOptions`) | ✅ (`NewWithStoreOptions`) |
+| Compare function | ✅ | ✅ (`NewWithStoreOptions`; default: byte comparison) | ✅ (`NewWithStoreOptions`; default: byte comparison) |
 | Persistence | ❌ | ✅ | ✅ |
 | Version tracking | ❌ | ✅ | ✅ |
 | Transactions | ❌ | ✅ | ✅ |
