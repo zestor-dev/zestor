@@ -468,54 +468,44 @@ func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.
 		return store.SetUnchanged, err
 	}
 
-	ct, err := tx.Exec(ctx,
-		`INSERT INTO zestor_kv(ns_id,kind,key,value) VALUES($1,$2,$3,$4)
-         ON CONFLICT (ns_id,kind,key) DO NOTHING`,
-		s.ns, kind, key, enc)
+	// One statement, so a delete cannot remove the row between the insert and
+	// the read that used to follow it. DO NOTHING does not lock the existing
+	// row; this update does. No row comes back when the stored bytes are
+	// already equal, and version starts at 1, so etype = 'create' means the
+	// key was inserted rather than updated.
+	var created bool
+	err = tx.QueryRow(ctx, `
+WITH upsert AS (
+    INSERT INTO zestor_kv(ns_id, kind, key, value)
+    VALUES ($1, $2, $3, $4)
+    ON CONFLICT (ns_id, kind, key) DO UPDATE
+        SET value = EXCLUDED.value,
+            version = zestor_kv.version + 1,
+            updated_at = now()
+        WHERE zestor_kv.value IS DISTINCT FROM EXCLUDED.value
+    RETURNING kind, key, value, (version = 1) AS created
+)
+INSERT INTO zestor_outbox(ns_id, kind, key, etype, value)
+SELECT $1, kind, key, CASE WHEN created THEN 'create' ELSE 'update' END, value
+FROM upsert
+RETURNING (etype = 'create')
+`, s.ns, kind, key, enc).Scan(&created)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.Commit(ctx); err != nil {
+			return store.SetUnchanged, err
+		}
+		return store.SetUnchanged, nil
+	}
 	if err != nil {
 		return store.SetUnchanged, err
 	}
-	result := store.SetCreated
-
-	if ct.RowsAffected() != 1 {
-		var cur []byte
-		err = tx.QueryRow(ctx,
-			`SELECT value FROM zestor_kv WHERE ns_id=$1 AND kind=$2 AND key=$3`,
-			s.ns, kind, key).Scan(&cur)
-		if err != nil {
-			return store.SetUnchanged, err
-		}
-		if bytes.Equal(cur, enc) {
-			if err := tx.Commit(ctx); err != nil {
-				return store.SetUnchanged, err
-			}
-			return store.SetUnchanged, nil
-		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE zestor_kv
-               SET value=$4,
-                   version=version+1,
-                   updated_at=now()
-             WHERE ns_id=$1 AND kind=$2 AND key=$3`,
-			s.ns, kind, key, enc); err != nil {
-			return store.SetUnchanged, err
-		}
-		result = store.SetUpdated
-	}
-
-	etype := store.EventTypeCreate
-	if result == store.SetUpdated {
-		etype = store.EventTypeUpdate
-	}
-	if err := s.appendOutbox(ctx, tx, kind, key, etype, enc); err != nil {
-		return store.SetUnchanged, err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return store.SetUnchanged, err
 	}
-
-	return result, nil
+	if created {
+		return store.SetCreated, nil
+	}
+	return store.SetUpdated, nil
 }
 
 func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
