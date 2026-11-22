@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +42,49 @@ func TestConformance(t *testing.T) {
 		EventDelay:  2 * time.Second,
 		SettleDelay: 250 * time.Millisecond,
 	})
+}
+
+// An in-memory database is private to the connection that opened it, so the
+// whole contract has to hold with the pool pinned to one connection.
+func TestConformanceInMemory(t *testing.T) {
+	storetest.Run(t, storetest.Config{
+		New: func(t *testing.T) store.Store[storetest.Value] {
+			s, err := sqlite.New[storetest.Value](context.Background(), sqlite.Options{
+				DSN:   ":memory:",
+				Codec: &codec.JSON{},
+			})
+			if err != nil {
+				t.Fatalf("sqlite.New: %v", err)
+			}
+			return s
+		},
+		EventDelay:  2 * time.Second,
+		SettleDelay: 250 * time.Millisecond,
+	})
+}
+
+func TestInMemoryConcurrentReaders(t *testing.T) {
+	for _, dsn := range []string{":memory:", "file::memory:", "file:mem?mode=memory"} {
+		t.Run(dsn, func(t *testing.T) {
+			ctx := context.Background()
+			s := newStore(t, dsn)
+			if _, err := s.Set(ctx, "k", "a", Note{Title: "a"}); err != nil {
+				t.Fatalf("Set: %v", err)
+			}
+
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if _, ok, err := s.Get(ctx, "k", "a"); err != nil || !ok {
+						t.Errorf("concurrent Get: ok=%v err=%v — a pooled connection opened a different, empty database", ok, err)
+					}
+				}()
+			}
+			wg.Wait()
+		})
+	}
 }
 
 // --- sqlite-specific behaviour ----------------------------------------------

@@ -37,7 +37,7 @@ type User struct {
 
 func main() {
     s, err := sqlite.New[User](sqlite.Options{
-        DSN:   "file:app.db?cache=shared",
+        DSN:   "file:app.db",
         Codec: &codec.JSON{},
     })
     if err != nil {
@@ -72,16 +72,25 @@ type Options struct {
 
 | DSN | Description |
 |-----|-------------|
-| `file:app.db` | Simple file database |
-| `file:app.db?cache=shared` | Shared cache (recommended) |
+| `file:app.db` | Simple file database (recommended) |
 | `file:app.db?mode=rwc` | Read-write-create |
-| `file::memory:?cache=shared` | In-memory (testing) |
+| `:memory:` | In-memory, private to this store (testing) |
+
+An in-memory database exists only inside the connection that opened it, so for
+any in-memory DSN (`:memory:`, `file::memory:`, `mode=memory`) the store holds
+a single connection and every operation takes turns on it. A `List` filter
+must therefore not call back into the store: the connection is still busy
+reading the rows being filtered.
+
+Avoid `file::memory:?cache=shared`: every store in the process opened with it
+shares one database. SQLite itself
+[discourages shared-cache mode](https://www.sqlite.org/sharedcache.html).
 
 ### Full Configuration
 
 ```go
 s, _ := sqlite.New[Config](sqlite.Options{
-    DSN:         "file:config.db?cache=shared",
+    DSN:         "file:config.db",
     Codec:       &codec.JSON{},
     BusyTimeout: 5 * time.Second,  // Wait up to 5s for locks
     DisableWAL:  false,            // Keep WAL enabled (default)
@@ -185,10 +194,9 @@ s.Set(ctx, "config", "app", Config{Debug: true})
 
 ### Optimizing Performance
 
-1. **Use shared cache**: `?cache=shared`
-2. **Keep WAL enabled**: Default setting
-3. **Set busy timeout**: Prevents lock errors
-4. **Batch writes**: Use `SetMany` for bulk operations
+1. **Keep WAL enabled**: Default setting
+2. **Set busy timeout**: Prevents lock errors
+3. **Batch writes**: Use `SetMany` for bulk operations
 
 ## Limitations
 
@@ -266,7 +274,7 @@ type Note struct {
 
 func main() {
     s, err := sqlite.New[Note](sqlite.Options{
-        DSN:         "file:notes.db?cache=shared",
+        DSN:         "file:notes.db",
         Codec:       &codec.JSON{},
         BusyTimeout: 5 * time.Second,
     })
