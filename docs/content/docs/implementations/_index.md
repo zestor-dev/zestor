@@ -54,11 +54,11 @@ memStore := gomap.NewMemStore[User](opts)
 processUsers(memStore)
 
 // SQLite
-sqlStore, _ := sqlite.New[User](sqlOpts)
+sqlStore, _ := sqlite.New[User](ctx, sqlOpts)
 processUsers(sqlStore)
 
 // PostgreSQL
-pgStore, _ := postgres.New[User](pgOpts)
+pgStore, _ := postgres.New[User](ctx, pgOpts)
 processUsers(pgStore)
 ```
 
@@ -72,12 +72,12 @@ func NewStore(cfg Config) (store.Store[User], error) {
         return gomap.NewMemStore[User](store.StoreOptions[User]{}), nil
     }
     if cfg.DatabaseURL != "" {
-        return postgres.New[User](postgres.Options{
+        return postgres.New[User](ctx, postgres.Options{
             ConnString: cfg.DatabaseURL,
             Codec:      &codec.JSON{},
         })
     }
-    return sqlite.New[User](sqlite.Options{
+    return sqlite.New[User](ctx, sqlite.Options{
         DSN:   cfg.DatabasePath,
         Codec: &codec.JSON{},
     })
@@ -90,8 +90,8 @@ func NewStore(cfg Config) (store.Store[User], error) {
 |---------|-------|--------|----------|
 | Thread-safe | ✅ | ✅ | ✅ |
 | Watch/Subscribe | ✅ | ✅ (in-process) | ✅ (cross-process via NOTIFY + outbox) |
-| Validation hooks | ✅ | ❌ | ❌ |
-| Compare function | ✅ | ❌ (byte comparison) | ❌ (byte comparison) |
+| Validation hooks | ✅ | ✅ (`NewWithStoreOptions`) | ❌ |
+| Compare function | ✅ | ✅ (`NewWithStoreOptions`; default: byte comparison) | ❌ (byte comparison) |
 | Persistence | ❌ | ✅ | ✅ |
 | Version tracking | ❌ | ✅ | ✅ |
 | Transactions | ❌ | ✅ | ✅ |

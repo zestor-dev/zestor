@@ -23,44 +23,39 @@ func dsn(t *testing.T) string {
 	return "file:" + filepath.Join(t.TempDir(), "zestor.db")
 }
 
-func TestConformance(t *testing.T) {
-	storetest.Run(t, storetest.Config{
+func conformanceConfig(options func(t *testing.T) sqlite.Options) storetest.Config {
+	return storetest.Config{
 		New: func(t *testing.T) store.Store[storetest.Value] {
-			s, err := sqlite.New[storetest.Value](context.Background(), sqlite.Options{
-				DSN:         dsn(t),
-				Codec:       &codec.JSON{},
-				BusyTimeout: 5 * time.Second,
-			})
+			s, err := sqlite.New[storetest.Value](context.Background(), options(t))
 			if err != nil {
 				t.Fatalf("sqlite.New: %v", err)
 			}
 			return s
 		},
-		// NewWithOptions is deliberately omitted: sqlite does not accept
-		// store.StoreOptions, so the validation and compare cases skip. See
-		// FIX-PLAN X3.
+		NewWithOptions: func(t *testing.T, so store.StoreOptions[storetest.Value]) store.Store[storetest.Value] {
+			s, err := sqlite.NewWithStoreOptions(context.Background(), options(t), so)
+			if err != nil {
+				t.Fatalf("sqlite.NewWithStoreOptions: %v", err)
+			}
+			return s
+		},
 		EventDelay:  2 * time.Second,
 		SettleDelay: 250 * time.Millisecond,
-	})
+	}
+}
+
+func TestConformance(t *testing.T) {
+	storetest.Run(t, conformanceConfig(func(t *testing.T) sqlite.Options {
+		return sqlite.Options{DSN: dsn(t), Codec: &codec.JSON{}, BusyTimeout: 5 * time.Second}
+	}))
 }
 
 // An in-memory database is private to the connection that opened it, so the
 // whole contract has to hold with the pool pinned to one connection.
 func TestConformanceInMemory(t *testing.T) {
-	storetest.Run(t, storetest.Config{
-		New: func(t *testing.T) store.Store[storetest.Value] {
-			s, err := sqlite.New[storetest.Value](context.Background(), sqlite.Options{
-				DSN:   ":memory:",
-				Codec: &codec.JSON{},
-			})
-			if err != nil {
-				t.Fatalf("sqlite.New: %v", err)
-			}
-			return s
-		},
-		EventDelay:  2 * time.Second,
-		SettleDelay: 250 * time.Millisecond,
-	})
+	storetest.Run(t, conformanceConfig(func(*testing.T) sqlite.Options {
+		return sqlite.Options{DSN: ":memory:", Codec: &codec.JSON{}}
+	}))
 }
 
 func TestInMemoryConcurrentReaders(t *testing.T) {

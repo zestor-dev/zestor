@@ -36,7 +36,7 @@ type User struct {
 }
 
 func main() {
-    s, err := sqlite.New[User](sqlite.Options{
+    s, err := sqlite.New[User](ctx, sqlite.Options{
         DSN:   "file:app.db",
         Codec: &codec.JSON{},
     })
@@ -68,6 +68,35 @@ type Options struct {
 }
 ```
 
+### Validation and Change Detection
+
+`NewWithStoreOptions` accepts the same `store.StoreOptions` as `gomap`:
+
+```go
+s, err := sqlite.NewWithStoreOptions(ctx, sqlite.Options{
+    DSN:   "file:app.db",
+    Codec: &codec.JSON{},
+}, store.StoreOptions[User]{
+    ValidateFns: map[string]store.ValidateFunc[User]{
+        "users": func(u User) error {
+            if u.Email == "" {
+                return errors.New("email required")
+            }
+            return nil
+        },
+    },
+    CompareFn: func(prev, next User) bool { return prev.Email == next.Email },
+})
+```
+
+Validators run on `Set`, on every value of a `SetMany` before anything is
+written (one invalid value rejects the whole batch), and on the result of a
+`SetFn` transform.
+
+Without a `CompareFn`, a write is unchanged when its encoding is byte-for-byte
+equal to what is stored. With one, the stored value is decoded and `CompareFn`
+decides, which costs a decode per write to an existing key.
+
 ### DSN Examples
 
 | DSN | Description |
@@ -89,7 +118,7 @@ shares one database. SQLite itself
 ### Full Configuration
 
 ```go
-s, _ := sqlite.New[Config](sqlite.Options{
+s, _ := sqlite.New[Config](ctx, sqlite.Options{
     DSN:         "file:config.db",
     Codec:       &codec.JSON{},
     BusyTimeout: 5 * time.Second,  // Wait up to 5s for locks
@@ -273,7 +302,7 @@ type Note struct {
 }
 
 func main() {
-    s, err := sqlite.New[Note](sqlite.Options{
+    s, err := sqlite.New[Note](ctx, sqlite.Options{
         DSN:         "file:notes.db",
         Codec:       &codec.JSON{},
         BusyTimeout: 5 * time.Second,

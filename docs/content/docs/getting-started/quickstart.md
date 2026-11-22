@@ -59,7 +59,7 @@ type User struct {
 
 func main() {
     // Create a persistent SQLite store
-    s, err := sqlite.New[User](sqlite.Options{
+    s, err := sqlite.New[User](ctx, sqlite.Options{
         DSN:   "file:myapp.db",
         Codec: &codec.JSON{},
     })
@@ -92,7 +92,7 @@ type User struct {
 }
 
 func main() {
-    s, err := postgres.New[User](postgres.Options{
+    s, err := postgres.New[User](ctx, postgres.Options{
         ConnString: "postgresql://user:pass@localhost:5432/myapp?sslmode=disable",
         Codec:      &codec.JSON{},
         Timeout:    10 * time.Second,

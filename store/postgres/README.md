@@ -18,7 +18,7 @@ import (
     "github.com/zestor-dev/zestor/store/postgres"
 )
 
-s, err := postgres.New[MyData](postgres.Options{
+s, err := postgres.New[MyData](ctx, postgres.Options{
     ConnString: "postgresql://user:pass@localhost:5432/dbname?sslmode=disable",
     Codec:      &codec.JSON{},
     Namespace:  0,                    // optional multi-tenant column (default 0)

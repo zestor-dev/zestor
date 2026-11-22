@@ -42,7 +42,7 @@ The most common choice. Human-readable, widely supported.
 ```go
 import "github.com/zestor-dev/zestor/codec"
 
-s, _ := sqlite.New[User](sqlite.Options{
+s, _ := sqlite.New[User](ctx, sqlite.Options{
     DSN:   "file:app.db",
     Codec: &codec.JSON{},
 })
@@ -101,7 +101,7 @@ Human-friendly format, great for configuration.
 ```go
 import "github.com/zestor-dev/zestor/codec"
 
-s, _ := sqlite.New[Config](sqlite.Options{
+s, _ := sqlite.New[Config](ctx, sqlite.Options{
     DSN:   "file:config.db",
     Codec: &codec.YAML{},
 })
@@ -156,7 +156,7 @@ func (c *MsgpackCodec) Unmarshal(data []byte, v any) error {
 }
 
 // Use it
-s, _ := sqlite.New[User](sqlite.Options{
+s, _ := sqlite.New[User](ctx, sqlite.Options{
     DSN:   "file:app.db",
     Codec: &MsgpackCodec{},
 })
