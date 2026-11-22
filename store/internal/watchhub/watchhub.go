@@ -42,6 +42,13 @@ func New[T any]() *Hub[T] {
 	return &Hub[T]{subs: make(map[string]map[*sub[T]]struct{})}
 }
 
+// Watching reports whether kind has a subscriber.
+func (h *Hub[T]) Watching(kind string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !h.closed && len(h.subs[kind]) > 0
+}
+
 // Kinds returns the kinds that currently have a subscriber.
 func (h *Hub[T]) Kinds() []string {
 	h.mu.Lock()

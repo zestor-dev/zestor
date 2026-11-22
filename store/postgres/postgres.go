@@ -948,6 +948,45 @@ func (s *storePG[T]) catchUpLocked(ctx context.Context, kind string) error {
 }
 
 func (s *storePG[T]) triggerDrain(ctx context.Context, kind string) {
+	if s.hub.Watching(kind) {
+		s.launchDrain(ctx, kind)
+		return
+	}
+	// Nobody is watching, so decoding the rows would be wasted. Remember how
+	// far the outbox got instead. A later Watch catches up from this cursor
+	// and does not receive the writes that predate it. Recheck under drainMu:
+	// a watcher can arrive while this waits, and that watcher needs a real drain.
+	s.drainMu.Lock()
+	watching := s.hub.Watching(kind)
+	if !watching {
+		s.advanceCursorLocked(ctx, kind)
+	}
+	s.drainMu.Unlock()
+	if watching {
+		s.launchDrain(ctx, kind)
+	}
+}
+
+// advanceCursorLocked moves kind's cursor to the newest committed outbox row.
+// The caller holds drainMu. Writers in a namespace commit in id order, so a
+// committed max cannot leave an older row still in flight.
+func (s *storePG[T]) advanceCursorLocked(ctx context.Context, kind string) {
+	cursor, seen := s.lastID[kind]
+	if !seen {
+		cursor = s.startID
+	}
+	var maxID int64
+	err := s.pool.QueryRow(ctx, `
+SELECT COALESCE(MAX(id), $3)
+  FROM zestor_outbox
+ WHERE ns_id = $1 AND kind = $2 AND id > $3`, s.ns, kind, cursor).Scan(&maxID)
+	if err != nil || maxID <= cursor {
+		return
+	}
+	s.lastID[kind] = maxID
+}
+
+func (s *storePG[T]) launchDrain(ctx context.Context, kind string) {
 	s.stateMu.Lock()
 	st := s.draining[kind]
 	if st == nil {
