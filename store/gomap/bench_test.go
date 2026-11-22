@@ -44,6 +44,22 @@ func BenchmarkGet(b *testing.B) {
 	}
 }
 
+func BenchmarkList10k(b *testing.B) {
+	s := benchStore(b)
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		got, err := s.List(ctx, "k")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != benchKindSize {
+			b.Fatalf("List len = %d, want %d", len(got), benchKindSize)
+		}
+	}
+}
+
 func BenchmarkSet(b *testing.B) {
 	s := benchStore(b)
 	ctx := context.Background()
