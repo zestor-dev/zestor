@@ -798,6 +798,60 @@ func TestSetManyEmpty(t *testing.T) {
 	}
 }
 
+func TestOutboxRetentionDeletesOldRows(t *testing.T) {
+	ctx := context.Background()
+	ns := nextNamespace()
+	s, err := postgres.New[TestData](ctx, postgres.Options{
+		ConnString:      getPostgresConn(),
+		Codec:           &codec.JSON{},
+		Namespace:       ns,
+		Timeout:         10 * time.Second,
+		OutboxRetention: 200 * time.Millisecond,
+	})
+	if err != nil {
+		reportPostgresErr(t, err)
+	}
+	defer s.Close()
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, `
+INSERT INTO zestor_outbox(ns_id, kind, key, etype, value, at)
+VALUES ($1, 'k', 'stale', 'create', convert_to('{"name":"old","value":1}','UTF8'), now() - interval '1 hour')`, ns); err != nil {
+		t.Fatal(err)
+	}
+	// The insert notifies, which moves the cursor past the row, and the
+	// retention loop then deletes it.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var n int
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM zestor_outbox WHERE ns_id=$1 AND key='stale'`, ns).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("old outbox row was not deleted")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if _, err := s.Set(ctx, "k", "fresh", TestData{Name: "fresh"}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM zestor_outbox WHERE ns_id=$1 AND key='fresh'`, ns).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("fresh outbox row count = %d, want 1", n)
+	}
+}
+
 func TestDumpIncludesVersion(t *testing.T) {
 	ctx := context.Background()
 	s := newStore[TestData](t, nextNamespace())
