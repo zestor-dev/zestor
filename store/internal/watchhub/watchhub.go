@@ -42,6 +42,20 @@ func New[T any]() *Hub[T] {
 	return &Hub[T]{subs: make(map[string]map[*sub[T]]struct{})}
 }
 
+// Kinds returns the kinds that currently have a subscriber.
+func (h *Hub[T]) Kinds() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil
+	}
+	out := make([]string, 0, len(h.subs))
+	for kind := range h.subs {
+		out = append(out, kind)
+	}
+	return out
+}
+
 // Hooks are backend callbacks that run while publishers are locked out, so that
 // everything they do is ordered ahead of the new subscription.
 //
