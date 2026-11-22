@@ -1443,7 +1443,7 @@ func (s *storePG[T]) Dump(ctx context.Context, w io.Writer) error {
 	defer cancel()
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT kind, key, OCTET_LENGTH(value), version, updated_at
+		`SELECT kind, key, value, version, updated_at
            FROM zestor_kv
           WHERE ns_id=$1
        ORDER BY kind, key`, s.ns)
@@ -1455,13 +1455,23 @@ func (s *storePG[T]) Dump(ctx context.Context, w io.Writer) error {
 	bw := bufio.NewWriter(w)
 	for rows.Next() {
 		var kind, key string
-		var sz, ver int
+		var value []byte
+		var ver int
 		var ts time.Time
-		if err := rows.Scan(&kind, &key, &sz, &ver, &ts); err != nil {
+		if err := rows.Scan(&kind, &key, &value, &ver, &ts); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s\n",
-			kind, key, ver, sz, ts.UTC().Format(time.RFC3339Nano)); err != nil {
+		updated := ts.UTC().Format(time.RFC3339Nano)
+		var decoded T
+		if err := s.codec.Unmarshal(value, &decoded); err != nil {
+			if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=<undecodable>\n",
+				kind, key, ver, len(value), updated); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=%+v\n",
+			kind, key, ver, len(value), updated, decoded); err != nil {
 			return err
 		}
 	}

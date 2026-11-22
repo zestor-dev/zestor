@@ -47,6 +47,22 @@ func BenchmarkGet(b *testing.B) {
 	}
 }
 
+func BenchmarkList10k(b *testing.B) {
+	s := benchStore(b)
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		got, err := s.List(ctx, "k")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != benchKindSize {
+			b.Fatalf("List len = %d, want %d", len(got), benchKindSize)
+		}
+	}
+}
+
 func BenchmarkSet(b *testing.B) {
 	s := benchStore(b)
 	ctx := context.Background()
@@ -54,6 +70,29 @@ func BenchmarkSet(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		if _, err := s.Set(ctx, "k", "k00000", Note{Title: "s", N: i}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSetMany10k(b *testing.B) {
+	s := benchStore(b)
+	ctx := context.Background()
+	vals := make(map[string]Note, benchKindSize)
+	keys := make([]string, benchKindSize)
+	for i := range benchKindSize {
+		keys[i] = fmt.Sprintf("k%05d", i)
+		vals[keys[i]] = Note{Title: "s"}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; b.Loop(); n++ {
+		for _, k := range keys {
+			v := vals[k]
+			v.N = n
+			vals[k] = v
+		}
+		if err := s.SetMany(ctx, "k", vals); err != nil {
 			b.Fatal(err)
 		}
 	}

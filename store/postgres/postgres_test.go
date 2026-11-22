@@ -896,4 +896,31 @@ func TestDumpIncludesVersion(t *testing.T) {
 	if !strings.Contains(buf.String(), "k/a v2") {
 		t.Errorf("Dump() = %q, want it to report version 2", buf.String())
 	}
+	if !strings.Contains(buf.String(), "Name:v2") {
+		t.Errorf("Dump() = %q, want the decoded value", buf.String())
+	}
+}
+
+func TestDumpUndecodableValue(t *testing.T) {
+	ctx := context.Background()
+	ns := nextNamespace()
+	s := newStore[TestData](t, ns)
+	defer s.Close()
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, `
+INSERT INTO zestor_kv(ns_id, kind, key, value) VALUES ($1, 'k', 'bad', $2)`, ns, []byte{0xff}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := s.(store.Dumper).Dump(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "k/bad") || !strings.Contains(buf.String(), "<undecodable>") {
+		t.Errorf("Dump() = %q, want the key and an undecodable marker", buf.String())
+	}
 }
