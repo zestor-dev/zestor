@@ -117,9 +117,10 @@ ch, _ = s.Watch(watchCtx, "users",
 - **Ordering** — events arrive in the order the writes were applied.
 - **Replay precedes live** — with `WithInitialReplay`, every replayed event arrives before
   any event for a write that happened after the `Watch` call.
-- **No silent gaps** — a consumer that falls roughly `BufferSize` events behind receives a
-  final event carrying `ErrWatchOverflow` and then the channel closes, rather than quietly
-  missing events. Event type filters never suppress that signal.
+- **No silent gaps** — `BufferSize` is how many live events may be accepted but not yet
+  sent. One more ends the watch: a final event carrying `ErrWatchOverflow`, then the channel
+  closes, rather than quietly missing events. The initial replay does not count. Event type
+  filters never suppress that signal.
 
 ## Validation
 
@@ -158,8 +159,8 @@ All methods take a `context.Context` as their first argument.
 |--------|-------------|
 | `Get(ctx, kind, key)` | Get a single value |
 | `List(ctx, kind, filters...)` | List all values, optionally filtered |
-| `Keys(ctx, kind)` | Get all keys |
-| `Values(ctx, kind)` | Get all key-value pairs |
+| `Keys(ctx, kind)` | Get all keys, in no particular order |
+| `Values(ctx, kind)` | Get all key-value pairs, in no particular order |
 | `Count(ctx, kind)` | Count items |
 | `GetAll(ctx)` | Get all kinds and their data |
 

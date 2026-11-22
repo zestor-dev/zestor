@@ -247,6 +247,9 @@ func TestDumpIncludesVersion(t *testing.T) {
 	if !strings.Contains(buf.String(), "notes/a v2") {
 		t.Errorf("Dump() = %q, want it to report version 2", buf.String())
 	}
+	if !strings.Contains(buf.String(), "Title:v2") {
+		t.Errorf("Dump() = %q, want the decoded value", buf.String())
+	}
 }
 
 // failCodec marshals successfully until its budget runs out, then fails.

@@ -58,9 +58,11 @@ type Event[T any] struct {
     Kind      string    // The kind (e.g., "users")
     Name      string    // The key (e.g., "alice")
     EventType EventType // create, update, or delete
-    Object    T         // The value (or previous value for delete)
+    Object    T         // The value the writer passed in (previous value for delete)
 }
 ```
+
+`gomap` and `sqlite` put the writer's value in `Object`. If `T` contains a slice, map, or pointer, that aliases the writer's data, so don't mutate it. `postgres` delivers the value decoded from storage.
 
 ## Watch Options
 
@@ -113,7 +115,7 @@ ch, _ := s.Watch(watchCtx, "users",
 )
 ```
 
-Default is 128. `BufferSize` sets how far the consumer may fall behind before the watch overflows and is terminated with `ErrWatchOverflow` — see [No silent gaps](#no-silent-gaps).
+Default is 128. `BufferSize` is how many live events may be accepted but not yet sent before the watch overflows and is terminated with `ErrWatchOverflow`. The initial replay does not count — see [No silent gaps](#no-silent-gaps).
 
 ### Combining Options
 
@@ -204,10 +206,10 @@ you already received.
 
 ### No silent gaps
 
-If your consumer falls roughly `BufferSize` events behind, the watch is
-**terminated rather than degraded**: you receive a final event with
-`EventType` `EventTypeError` and `Err` set to `store.ErrWatchOverflow`, and then
-the channel closes.
+`BufferSize` is how many live events may be accepted and not yet sent. One more,
+and the watch is **terminated rather than degraded**: you receive a final event
+with `EventType` `EventTypeError` and `Err` set to `store.ErrWatchOverflow`, and
+then the channel closes. The initial replay does not count toward the limit.
 
 ```go
 for event := range ch {

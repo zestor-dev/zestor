@@ -1,14 +1,39 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zestor-dev/zestor/codec"
 )
+
+func TestDumpUndecodableValue(t *testing.T) {
+	ctx := context.Background()
+	st, err := New[int](ctx, Options{
+		DSN:   "file:" + filepath.Join(t.TempDir(), "zestor.db"),
+		Codec: &codec.JSON{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := st.(*sqLiteStore[int])
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO zestor_kv(kind, key, value) VALUES(?,?,?)`, "k", "bad", []byte{0xff}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := s.Dump(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "k/bad") || !strings.Contains(buf.String(), "<undecodable>") {
+		t.Errorf("Dump() = %q, want the key and an undecodable marker", buf.String())
+	}
+}
 
 // busy_timeout is per connection. Setting it once through the *sql.DB reaches
 // whichever pooled connection served that call and no other, so every

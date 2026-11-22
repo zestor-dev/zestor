@@ -25,7 +25,10 @@ type Reader[T any] interface {
 	Get(ctx context.Context, kind, key string) (val T, ok bool, err error)
 	List(ctx context.Context, kind string, filter ...FilterFunc[T]) (map[string]T, error)
 	Count(ctx context.Context, kind string) (int, error)
+	// Keys returns the keys of kind. The order is unspecified: it can differ
+	// between calls and between backends. Sort the result for a stable order.
 	Keys(ctx context.Context, kind string) ([]string, error)
+	// Values returns the entries of kind. The order is unspecified, as for Keys.
 	Values(ctx context.Context, kind string) ([]KeyValue[T], error)
 	GetAll(ctx context.Context) (map[string]map[string]T, error)
 }
@@ -91,10 +94,13 @@ type Writer[T any] interface {
 //     delivered before every event for a write that happened after the call to
 //     Watch. The snapshot is taken atomically with the subscription.
 //
-//  3. No silent gaps — if the consumer falls roughly BufferSize events behind,
-//     the watch is terminated rather than degraded: a final event with
-//     EventType EventTypeError and Err ErrWatchOverflow is delivered, then the
-//     channel is closed. Event type filters never suppress this event.
+//  3. No silent gaps — BufferSize is how many live events may be accepted and
+//     not yet sent to the consumer. One more ends the watch rather than
+//     letting it fall further behind: a final event with EventType
+//     EventTypeError and Err ErrWatchOverflow is delivered, then the channel
+//     is closed. The delivery channel holds one event past that count, and the
+//     initial replay does not count at all. Event type filters never suppress
+//     the terminal event.
 //
 //  4. Exactly-once close — the channel is closed exactly once, when ctx is
 //     cancelled, when the watch overflows, or when the store is closed. The
@@ -143,7 +149,12 @@ type Event[T any] struct {
 	Kind      string
 	Name      string
 	EventType EventType
-	Object    T // for delete: previous value; for EventTypeError: the zero value
+	// Object is the value the writer passed in for the gomap and sqlite
+	// backends. If T contains a slice, map, or pointer, it aliases that data
+	// and must not be mutated. postgres delivers the value decoded from
+	// storage instead. For a delete, Object is the previous value. For
+	// EventTypeError it is the zero value.
+	Object T
 	// Err is set only on EventTypeError, the terminal event of a watch.
 	Err error
 }
@@ -164,8 +175,9 @@ const (
 // Watch options
 type WatchOption[T any] func(*WatchCfg[T])
 
-// DefaultWatchBufferSize is the default number of events a watcher may fall
-// behind before the watch overflows.
+// DefaultWatchBufferSize is how many live events a watcher may have accepted
+// but not yet sent before the watch overflows. The initial replay does not
+// count against it.
 const DefaultWatchBufferSize = 128
 
 type WatchCfg[T any] struct {
@@ -173,8 +185,8 @@ type WatchCfg[T any] struct {
 	Initial bool
 	// only send events of the specified types
 	EventTypes map[EventType]struct{}
-	// how far the consumer may fall behind before ErrWatchOverflow
-	// (0 means use DefaultWatchBufferSize)
+	// how many live events may be outstanding before ErrWatchOverflow.
+	// 0 means DefaultWatchBufferSize. The initial replay does not count.
 	BufferSize int
 }
 
