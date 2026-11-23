@@ -7,15 +7,23 @@ updates:
       - /
       - /codec
       - /docs
+      - /remote
       - /store/postgres
       - /store/sqlite
+      - /tools
     schedule:
       interval: weekly
     # sqlite and postgres require this repo's own modules at a commit that
     # `go get` can fetch. Those pins move when we publish, not on a weekly bump.
+    # Connect from 1.21.1 and buf from 1.73.0 require Go 1.26; the repo is on
+    # Go 1.25.
     ignore:
       - dependency-name: github.com/zestor-dev/zestor
       - dependency-name: github.com/zestor-dev/zestor/codec
+      - dependency-name: connectrpc.com/connect
+        versions: [">= 1.21.1"]
+      - dependency-name: github.com/bufbuild/buf
+        versions: [">= 1.73.0"]
     groups:
       gomod-minor-and-patch:
         patterns:

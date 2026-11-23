@@ -1,9 +1,10 @@
-.PHONY: test test-all test-root test-codec integration-test test-sqlite test-postgres \
-	test-postgres-docker postgres-up postgres-down postgres-logs
+.PHONY: test test-all test-root test-codec test-remote integration-test test-sqlite test-postgres \
+	test-postgres-docker postgres-up postgres-down postgres-logs proto
 
 GO ?= go
+BIN := $(CURDIR)/.bin
 
-test: test-root test-codec
+test: test-root test-codec test-remote
 	@echo "note: this does not run the SQLite or Postgres modules."
 	@echo "      make test-sqlite"
 	@echo "      make test-postgres          # Postgres already listening on :5432"
@@ -16,6 +17,16 @@ test-root:
 
 test-codec:
 	cd codec && $(GO) test ./...
+
+test-remote:
+	cd remote && $(GO) test ./...
+
+# Regenerates remote/gen from proto/. The generators are pinned in tools/go.mod
+# and installed into .bin, so every machine produces the same code.
+proto:
+	cd tools && GOWORK=off GOBIN=$(BIN) $(GO) install tool
+	PATH="$(BIN):$$PATH" $(BIN)/buf lint
+	PATH="$(BIN):$$PATH" $(BIN)/buf generate
 
 integration-test: test-sqlite test-postgres
 

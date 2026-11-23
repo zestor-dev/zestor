@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package zestor.store.v1;
+
+option go_package = "github.com/zestor-dev/zestor/remote/gen/zestor/store/v1;storev1";
+
+// StoreService exposes one store.Store over the network.
+//
+// Values are opaque bytes, encoded with the codec the server and its clients
+// agree on (JSON unless configured otherwise). The server decodes them into
+// its value type, so the wrapped store's validation and change detection
+// apply to remote writes exactly as to local ones.
+//
+// A failed call carries a Failure detail naming the store error, so a client
+// can map it back to the same sentinel error.
+service StoreService {
+  rpc Get(GetRequest) returns (GetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // List returns every entry of a kind. Filters are functions, so clients
+  // apply them after the call.
+  rpc List(ListRequest) returns (ListResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc Count(CountRequest) returns (CountResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc Keys(KeysRequest) returns (KeysResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc GetAll(GetAllRequest) returns (GetAllResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  rpc Set(SetRequest) returns (SetResponse);
+
+  // SetMany writes several entries of one kind in a single store call.
+  rpc SetMany(SetManyRequest) returns (SetManyResponse);
+
+  // CompareAndSet replaces the value at kind/key only if its stored encoding
+  // still equals expected. It is how a client runs SetFn: read, apply the
+  // function locally, then write only if nobody wrote in between. A mismatch
+  // fails with FAILURE_REASON_CONFLICT and the client retries from the read.
+  rpc CompareAndSet(CompareAndSetRequest) returns (CompareAndSetResponse);
+
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // Watch streams the events of one kind. The first message is always
+  // `subscribed`, sent once the subscription exists: every write after it is
+  // delivered. A watch that ends on a store error (overflow, an undecodable
+  // value, the store closing) sends a final `failure` message.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+message Entry {
+  string key = 1;
+  bytes value = 2;
+}
+
+message GetRequest {
+  string kind = 1;
+  string key = 2;
+}
+
+message GetResponse {
+  bool found = 1;
+  bytes value = 2;
+}
+
+message ListRequest {
+  string kind = 1;
+}
+
+message ListResponse {
+  repeated Entry entries = 1;
+}
+
+message CountRequest {
+  string kind = 1;
+}
+
+message CountResponse {
+  int64 count = 1;
+}
+
+message KeysRequest {
+  string kind = 1;
+}
+
+message KeysResponse {
+  repeated string keys = 1;
+}
+
+message GetAllRequest {}
+
+message KindEntries {
+  string kind = 1;
+  repeated Entry entries = 2;
+}
+
+message GetAllResponse {
+  repeated KindEntries kinds = 1;
+}
+
+enum SetResult {
+  SET_RESULT_UNSPECIFIED = 0;
+  SET_RESULT_UNCHANGED = 1;
+  SET_RESULT_CREATED = 2;
+  SET_RESULT_UPDATED = 3;
+}
+
+message SetRequest {
+  string kind = 1;
+  string key = 2;
+  bytes value = 3;
+}
+
+message SetResponse {
+  SetResult result = 1;
+}
+
+message SetManyRequest {
+  string kind = 1;
+  repeated Entry entries = 2;
+}
+
+message SetManyResponse {}
+
+message CompareAndSetRequest {
+  string kind = 1;
+  string key = 2;
+  // expected is the encoding the client read and applied its function to.
+  bytes expected = 3;
+  bytes value = 4;
+}
+
+message CompareAndSetResponse {
+  // changed is false when the new value compares equal to the stored one.
+  bool changed = 1;
+}
+
+message DeleteRequest {
+  string kind = 1;
+  string key = 2;
+}
+
+message DeleteResponse {
+  bool existed = 1;
+  bytes previous = 2;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_CREATE = 1;
+  EVENT_TYPE_UPDATE = 2;
+  EVENT_TYPE_DELETE = 3;
+}
+
+message WatchRequest {
+  string kind = 1;
+  // initial_replay sends every current key as a create event before any
+  // live event.
+  bool initial_replay = 2;
+  // event_types limits live and replayed events to these types. Empty means
+  // all of them. A failure is never filtered.
+  repeated EventType event_types = 3;
+  // buffer_size is how many live events may be accepted and not yet sent
+  // before the watch overflows. Zero means the store's default.
+  int32 buffer_size = 4;
+}
+
+message Event {
+  EventType type = 1;
+  string key = 2;
+  // value is the new value, or the previous one for a delete.
+  bytes value = 3;
+  // replay marks the creates of the initial replay. Only live events count
+  // against the watch buffer.
+  bool replay = 4;
+}
+
+message Subscribed {}
+
+message WatchResponse {
+  oneof message {
+    Subscribed subscribed = 1;
+    Event event = 2;
+    Failure failure = 3;
+  }
+}
+
+enum FailureReason {
+  FAILURE_REASON_UNSPECIFIED = 0;
+  FAILURE_REASON_KIND_REQUIRED = 1;
+  FAILURE_REASON_KEY_NOT_FOUND = 2;
+  FAILURE_REASON_CLOSED = 3;
+  FAILURE_REASON_WATCH_OVERFLOW = 4;
+  FAILURE_REASON_DECODE = 5;
+  // CONFLICT means a CompareAndSet found a different stored value.
+  FAILURE_REASON_CONFLICT = 6;
+  // APPLICATION means the error matched one the server was told about, such
+  // as a validation error. code names it, so a client that knows the same
+  // error can return it.
+  FAILURE_REASON_APPLICATION = 7;
+}
+
+// Failure names the store error behind a failed call or a watch that ended.
+// An error the server cannot name has reason UNSPECIFIED and only a message.
+message Failure {
+  FailureReason reason = 1;
+  string message = 2;
+  string code = 3;
+}

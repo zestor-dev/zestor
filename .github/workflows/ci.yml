@@ -24,8 +24,10 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             codec/go.sum
+            remote/go.sum
             store/sqlite/go.sum
             store/postgres/go.sum
+            tools/go.sum
 
       - name: gofmt
         run: |
@@ -39,7 +41,7 @@ jobs:
 
       - name: go vet
         run: |
-          for m in . codec store/sqlite store/postgres; do
+          for m in . codec remote store/sqlite store/postgres; do
             echo "::group::go vet $m"
             (cd "$m" && go vet ./...) || exit 1
             echo "::endgroup::"
@@ -47,11 +49,21 @@ jobs:
 
       - name: staticcheck
         run: |
-          for m in . codec store/sqlite store/postgres; do
+          for m in . codec remote store/sqlite store/postgres; do
             echo "::group::staticcheck $m"
             (cd "$m" && go run honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION} ./...) || exit 1
             echo "::endgroup::"
           done
+
+      - name: Generated code matches proto/
+        run: |
+          make proto
+          if [[ -n "$(git status --porcelain -- remote/gen)" ]]; then
+            echo "remote/gen is out of date. Run 'make proto' and commit the result."
+            git status --short -- remote/gen
+            git diff -- remote/gen
+            exit 1
+          fi
 
   modules:
     name: Module graph
@@ -78,7 +90,7 @@ jobs:
           done
 
   unit:
-    name: Unit (root, codec, sqlite)
+    name: Unit (root, codec, remote, sqlite)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -88,6 +100,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             codec/go.sum
+            remote/go.sum
             store/sqlite/go.sum
 
       - name: Root module (store, gomap, storetest, examples)
@@ -95,6 +108,10 @@ jobs:
 
       - name: Codec module
         working-directory: codec
+        run: go test -count=1 -race ./...
+
+      - name: Remote module
+        working-directory: remote
         run: go test -count=1 -race ./...
 
       - name: SQLite store module
