@@ -4,6 +4,7 @@ use (
 	.
 	./codec
 	./remote
+	./remote/conformance
 	./store/postgres
 	./store/sqlite
 )

@@ -1162,7 +1162,8 @@ type WatchRequest struct {
 	// live event.
 	InitialReplay bool `protobuf:"varint,2,opt,name=initial_replay,json=initialReplay,proto3" json:"initial_replay,omitempty"`
 	// event_types limits live and replayed events to these types. Empty means
-	// all of them. A failure is never filtered.
+	// all of them; EVENT_TYPE_UNSPECIFIED matches none, so a list holding only
+	// it receives nothing but a final failure. A failure is never filtered.
 	EventTypes []EventType `protobuf:"varint,3,rep,packed,name=event_types,json=eventTypes,proto3,enum=zestor.store.v1.EventType" json:"event_types,omitempty"`
 	// buffer_size is how many live events may be accepted and not yet sent
 	// before the watch overflows. Zero means the store's default.
