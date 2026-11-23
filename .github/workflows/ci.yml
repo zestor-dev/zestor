@@ -19,9 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # setup-go disables toolchain downloads, and the code generators in
+      # tools/ need a newer Go than the modules do.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version-file: tools/go.mod
           cache-dependency-path: |
             codec/go.sum
             remote/go.sum

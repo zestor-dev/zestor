@@ -28,7 +28,7 @@ A generic, type-safe key-value store for Go, with watch/subscribe and in-memory,
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
 
 ## Installation
 
