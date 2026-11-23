@@ -90,8 +90,10 @@ Represents a change event.
 type Event[T any] struct {
     Kind      string    // The kind (e.g., "users")
     Name      string    // The key (e.g., "alice")
-    EventType EventType // create, update, or delete
+    EventType EventType // create, update, delete, or error
     Object    T         // Value the writer passed in (previous value for delete)
+    Err       error     // Set only on the terminal error event
+    Replay    bool      // True for the creates of WithInitialReplay
 }
 ```
 

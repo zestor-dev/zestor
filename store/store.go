@@ -174,6 +174,9 @@ type Event[T any] struct {
 	Object T
 	// Err is set only on EventTypeError, the terminal event of a watch.
 	Err error
+	// Replay is true for the create events of the initial replay requested
+	// with WithInitialReplay, and false for every event of a live write.
+	Replay bool
 }
 
 type EventType string
