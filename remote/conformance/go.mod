@@ -3,4 +3,4 @@
 // the remote module depend on either driver.
 module github.com/zestor-dev/zestor/remote/conformance
 
-go 1.25
+go 1.26.0
