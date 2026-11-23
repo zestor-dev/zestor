@@ -166,7 +166,8 @@ message WatchRequest {
   // live event.
   bool initial_replay = 2;
   // event_types limits live and replayed events to these types. Empty means
-  // all of them. A failure is never filtered.
+  // all of them; EVENT_TYPE_UNSPECIFIED matches none, so a list holding only
+  // it receives nothing but a final failure. A failure is never filtered.
   repeated EventType event_types = 3;
   // buffer_size is how many live events may be accepted and not yet sent
   // before the watch overflows. Zero means the store's default.

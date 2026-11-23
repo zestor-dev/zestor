@@ -749,6 +749,11 @@ func testWatchReplayLargerThanBuffer(t *testing.T, cfg Config) {
 			opts := append([]store.WatchOption[Value]{store.WithInitialReplay[Value]()}, tc.opts...)
 			ch := watchCtx(t, cfg, s, "k", opts...)
 
+			// Not reading yet lets the whole replay queue up. A consumer that
+			// keeps pace would hide an implementation that counts the replay
+			// against the buffer.
+			time.Sleep(cfg.settleDelay())
+
 			seen := make(map[string]bool, n)
 			for i := range n {
 				ev := recv(t, cfg, ch)
