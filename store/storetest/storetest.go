@@ -9,6 +9,7 @@
 //	    storetest.Run(t, storetest.Config{
 //	        New: func(t *testing.T) store.Store[storetest.Value] { ... },
 //	        NewWithOptions: ...,   // omit to skip validation / compare cases
+//	        NewShared: ...,        // two handles on one database; omit for in-process
 //	    })
 //	}
 //
@@ -44,6 +45,13 @@ type Config struct {
 	// the backend does not support StoreOptions; the validation and compare
 	// cases are then skipped, and the skip is visible in the test output.
 	NewWithOptions func(t *testing.T, opts store.StoreOptions[Value]) store.Store[Value]
+
+	// NewShared returns two stores that read and write the same data. The
+	// consistency cases write through both and watch through the second, so a
+	// committed write that one of them never delivers fails the test. Leave
+	// nil when a second handle cannot see the first's watch events; both
+	// roles then use New.
+	NewShared func(t *testing.T) (write, read store.Store[Value])
 
 	// EventDelay bounds how long an event may take to reach a watcher. Backends
 	// that publish through a database round-trip need a generous value.
@@ -113,6 +121,11 @@ func Run(t *testing.T, cfg Config) {
 		{"WatchOverflowBypassesTypeFilter", testWatchOverflowBypassesTypeFilter},
 		{"WatchContextCancelClosesChannel", testWatchContextCancelClosesChannel},
 		{"WatchMultipleWatchersAreIndependent", testWatchMultipleWatchersAreIndependent},
+
+		// --- consistency under concurrency -------------------------------
+		{"ConcurrentIncrementsHaveNoGaps", testConcurrentIncrementsHaveNoGaps},
+		{"ConcurrentWritesMatchTheWatch", testConcurrentWritesMatchTheWatch},
+		{"SetManyIsAtomicToReaders", testSetManyIsAtomicToReaders},
 
 		// --- lifecycle ---------------------------------------------------
 		{"CloseClosesWatchers", testCloseClosesWatchers},
