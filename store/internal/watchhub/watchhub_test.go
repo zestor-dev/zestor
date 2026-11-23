@@ -100,8 +100,8 @@ func TestReplayDoesNotCountTowardCapacity(t *testing.T) {
 	for i := range n {
 		select {
 		case got, ok := <-ch:
-			if !ok || got == nil || got.Err != nil || got.Object != i {
-				t.Fatalf("replay event %d: ok=%v got=%v", i, ok, got)
+			if !ok || got == nil || got.Err != nil || got.Object != i || !got.Replay {
+				t.Fatalf("replay event %d: ok=%v got=%+v", i, ok, got)
 			}
 		case <-time.After(time.Second):
 			t.Fatalf("timed out at replay event %d", i)

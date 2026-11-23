@@ -29,6 +29,11 @@ import (
 	"github.com/zestor-dev/zestor/store"
 )
 
+// ErrInvalid is the error the validation case's validator returns. A backend
+// that carries errors over a network has to map it back, so that errors.Is
+// still finds it on the caller's side.
+var ErrInvalid = errors.New("storetest: invalid value")
+
 // Value is the element type every backend is exercised with. The struct tags
 // keep it usable with the JSON and YAML codecs.
 type Value struct {
@@ -701,12 +706,20 @@ func testWatchInitialReplay(t *testing.T, cfg Config) {
 		if ev.EventType != store.EventTypeCreate {
 			t.Errorf("replayed event for %s is %s, want create", ev.Name, ev.EventType)
 		}
+		if !ev.Replay {
+			t.Errorf("replayed event for %s has Replay=false", ev.Name)
+		}
 		seen[ev.Name] = true
 	}
 	for i := range 3 {
 		if !seen[fmt.Sprintf("k%d", i)] {
 			t.Errorf("initial replay omitted k%d", i)
 		}
+	}
+
+	mustSet(t, s, "k", "live", Value{Name: "live"})
+	if ev := recv(t, cfg, ch); ev.Name != "live" || ev.Replay {
+		t.Errorf("live write delivered as %s %q with Replay=%v, want a live create", ev.EventType, ev.Name, ev.Replay)
 	}
 }
 
@@ -750,9 +763,9 @@ func testWatchReplayLargerThanBuffer(t *testing.T, cfg Config) {
 
 			const key = "live"
 			mustSet(t, s, "k", key, Value{Name: "live"})
-			if ev := recv(t, cfg, ch); ev.Err != nil || ev.Name != key {
-				t.Errorf("after the replay got %s %q (err %v), want a live create for %q",
-					ev.EventType, ev.Name, ev.Err, key)
+			if ev := recv(t, cfg, ch); ev.Err != nil || ev.Name != key || ev.Replay {
+				t.Errorf("after the replay got %s %q (err %v, Replay=%v), want a live create for %q",
+					ev.EventType, ev.Name, ev.Err, ev.Replay, key)
 			}
 		})
 	}
@@ -1172,7 +1185,7 @@ func testValidationRejectsWrites(t *testing.T, cfg Config) {
 	if cfg.NewWithOptions == nil {
 		t.Skip("backend does not accept store.StoreOptions")
 	}
-	sentinel := errors.New("invalid")
+	sentinel := ErrInvalid
 	s := cfg.NewWithOptions(t, store.StoreOptions[Value]{
 		ValidateFns: map[string]store.ValidateFunc[Value]{
 			"k": func(v Value) error {

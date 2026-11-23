@@ -113,6 +113,9 @@ func (h *Hub[T]) Subscribe(ctx context.Context, kind string, cfg *store.WatchCfg
 		if err != nil {
 			return nil, err
 		}
+		for _, ev := range evs {
+			ev.Replay = true
+		}
 		s.replay = evs
 	}
 
