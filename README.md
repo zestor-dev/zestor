@@ -13,6 +13,7 @@ A generic, type-safe key-value store for Go, with watch/subscribe and in-memory,
 - **Thread-safe** — Concurrent reads and writes on every backend
 - **Watch/Subscribe** — Real-time notifications for create, update, and delete events
 - **Ordered, gap-free watches** — see [Delivery guarantees](#delivery-guarantees)
+- **Network API** — serve any store over gRPC or HTTP with [`remote`](remote/), and use it from Go as a `store.Store`
 
 ### Backend support
 
@@ -35,7 +36,7 @@ A generic, type-safe key-value store for Go, with watch/subscribe and in-memory,
 go get github.com/zestor-dev/zestor
 ```
 
-Besides [`store/gomap`](store/gomap/), optional backends include [`store/sqlite`](store/sqlite/) (embedded file) and [`store/postgres`](store/postgres/) (PostgreSQL with cross-process watch).
+Besides [`store/gomap`](store/gomap/), optional backends include [`store/sqlite`](store/sqlite/) (embedded file) and [`store/postgres`](store/postgres/) (PostgreSQL with cross-process watch). [`remote`](remote/) serves any of them over the network, with a Go client that is itself a store.
 
 ## Quick Start
 

@@ -15,6 +15,7 @@ Zestor provides multiple store implementations, all sharing the same `store.Stor
 | [gomap](gomap/) | Memory | ❌ Ephemeral | Caching, testing, high-speed access |
 | [sqlite](sqlite/) | SQLite file | ✅ Persistent | Desktop apps, CLI tools, embedded |
 | [postgres](postgres/) | PostgreSQL | ✅ Persistent | Servers, multi-instance apps, shared watch |
+| [remote](remote/) | Any of the above, in another process | Same as the served store | Sharing one store across services and languages |
 
 ## Choosing an Implementation
 
@@ -37,6 +38,12 @@ Zestor provides multiple store implementations, all sharing the same `store.Stor
 - A PostgreSQL server is already part of your stack
 - Multiple processes or replicas should share state and receive `Watch` notifications
 - You want multi-tenant isolation via namespaces (`ns_id`)
+
+### Use remote when:
+
+- The store lives in another service, or callers are not written in Go
+- Callers should not have database credentials or drivers
+- You want to `curl` the store while debugging
 
 ## Interface Compatibility
 
