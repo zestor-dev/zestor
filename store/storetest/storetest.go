@@ -13,8 +13,8 @@
 //	    })
 //	}
 //
-// A backend that implements store.Dumper is exercised for it too; one that does
-// not simply skips that case.
+// A backend that implements store.Dumper or store.Pager is exercised for it
+// too; one that does not simply skips that case.
 package storetest
 
 import (
@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -139,8 +140,9 @@ func Run(t *testing.T, cfg Config) {
 		{"CloseDeliversErrClosed", testCloseDeliversErrClosed},
 		{"CloseRacesWithOperations", testCloseRacesWithOperations},
 
-		// --- optional Dumper ---------------------------------------------
+		// --- optional Dumper and Pager ----------------------------------
 		{"DumperWritesEveryKey", testDumperWritesEveryKey},
+		{"PagesWalkInOrder", testPagesWalkInOrder},
 
 		// --- optional capabilities ---------------------------------------
 		{"ValidationRejectsWrites", testValidationRejectsWrites},
@@ -1154,6 +1156,148 @@ func testCloseIsIdempotent(t *testing.T, cfg Config) {
 // -----------------------------------------------------------------------------
 
 // Dump is optional: store.Dumper is asserted for, not required.
+// testPagesWalkInOrder checks the optional Pager: ascending bytewise order,
+// a cursor that is the last key (including the empty key), and a short page
+// at the end. List, Keys, and GetAll are unchanged and still return everything.
+func testPagesWalkInOrder(t *testing.T, cfg Config) {
+	s := newStore(t, cfg)
+	p, ok := s.(store.Pager[Value])
+	if !ok {
+		t.Skip("backend does not implement store.Pager")
+	}
+	ctx := context.Background()
+
+	mustSet(t, s, "k", "", Value{Name: "empty", N: 0})
+	mustSet(t, s, "k", "b", Value{Name: "b", N: 2})
+	mustSet(t, s, "k", "a", Value{Name: "a", N: 1})
+	mustSet(t, s, "k", "c", Value{Name: "c", N: 3})
+	mustSet(t, s, "other", "a", Value{Name: "other", N: 9})
+
+	if _, err := p.ListPage(ctx, "k", nil, 0); !errors.Is(err, store.ErrPageLimit) {
+		t.Errorf("ListPage limit 0 returned %v, want ErrPageLimit", err)
+	}
+	if _, err := p.KeysPage(ctx, "k", nil, -1); !errors.Is(err, store.ErrPageLimit) {
+		t.Errorf("KeysPage limit -1 returned %v, want ErrPageLimit", err)
+	}
+	if _, err := p.GetAllPage(ctx, nil, 0); !errors.Is(err, store.ErrPageLimit) {
+		t.Errorf("GetAllPage limit 0 returned %v, want ErrPageLimit", err)
+	}
+	if _, err := p.ListPage(ctx, "", nil, 1); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("ListPage empty kind returned %v, want ErrKindRequired", err)
+	}
+	if _, err := p.KeysPage(ctx, "", nil, 1); !errors.Is(err, store.ErrKindRequired) {
+		t.Errorf("KeysPage empty kind returned %v, want ErrKindRequired", err)
+	}
+
+	want := []string{"", "a", "b", "c"}
+	var after *string
+	var got []string
+	for range len(want) + 1 {
+		page, err := p.ListPage(ctx, "k", after, 2)
+		if err != nil {
+			t.Fatalf("ListPage: %v", err)
+		}
+		if len(page) > 2 {
+			t.Fatalf("ListPage returned %d entries, limit is 2", len(page))
+		}
+		for _, e := range page {
+			got = append(got, e.Key)
+			if e.Value.Name != e.Key && !(e.Key == "" && e.Value.Name == "empty") {
+				t.Fatalf("ListPage entry %q has value %+v", e.Key, e.Value)
+			}
+		}
+		if len(page) < 2 {
+			break
+		}
+		last := page[len(page)-1].Key
+		after = &last
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ListPage walk = %#v, want %#v", got, want)
+	}
+
+	// A cursor on a key that is not stored still means "strictly greater".
+	hole := "aa"
+	page, err := p.ListPage(ctx, "k", &hole, 10)
+	if err != nil {
+		t.Fatalf("ListPage after missing key: %v", err)
+	}
+	got = got[:0]
+	for _, e := range page {
+		got = append(got, e.Key)
+	}
+	if !slices.Equal(got, []string{"b", "c"}) {
+		t.Fatalf("ListPage after %q = %#v, want b, c", hole, got)
+	}
+
+	empty := ""
+	keys, err := p.KeysPage(ctx, "k", &empty, 10)
+	if err != nil {
+		t.Fatalf("KeysPage after empty key: %v", err)
+	}
+	if !slices.Equal(keys, []string{"a", "b", "c"}) {
+		t.Fatalf("KeysPage after empty key = %#v", keys)
+	}
+	got = nil
+	after = nil
+	for range len(want) + 1 {
+		keys, err = p.KeysPage(ctx, "k", after, 1)
+		if err != nil {
+			t.Fatalf("KeysPage: %v", err)
+		}
+		got = append(got, keys...)
+		if len(keys) < 1 {
+			break
+		}
+		after = &keys[0]
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("KeysPage walk = %#v, want %#v", got, want)
+	}
+
+	wantAll := []string{"k/", "k/a", "k/b", "k/c", "other/a"}
+	var cur *store.PageCursor
+	got = nil
+	for range len(wantAll) + 1 {
+		rows, err := p.GetAllPage(ctx, cur, 2)
+		if err != nil {
+			t.Fatalf("GetAllPage: %v", err)
+		}
+		if len(rows) > 2 {
+			t.Fatalf("GetAllPage returned %d entries, limit is 2", len(rows))
+		}
+		for _, e := range rows {
+			got = append(got, e.Kind+"/"+e.Key)
+		}
+		if len(rows) < 2 {
+			break
+		}
+		last := rows[len(rows)-1]
+		cur = &store.PageCursor{Kind: last.Kind, Key: last.Key}
+	}
+	if !slices.Equal(got, wantAll) {
+		t.Fatalf("GetAllPage walk = %#v, want %#v", got, wantAll)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := p.ListPage(canceled, "k", nil, 1); !errors.Is(err, context.Canceled) {
+		t.Errorf("ListPage on a canceled context returned %v, want Canceled", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := p.ListPage(ctx, "k", nil, 1); !errors.Is(err, store.ErrClosed) {
+		t.Errorf("ListPage after Close returned %v, want ErrClosed", err)
+	}
+	if _, err := p.KeysPage(ctx, "k", nil, 1); !errors.Is(err, store.ErrClosed) {
+		t.Errorf("KeysPage after Close returned %v, want ErrClosed", err)
+	}
+	if _, err := p.GetAllPage(ctx, nil, 1); !errors.Is(err, store.ErrClosed) {
+		t.Errorf("GetAllPage after Close returned %v, want ErrClosed", err)
+	}
+}
+
 func testDumperWritesEveryKey(t *testing.T, cfg Config) {
 	s := newStore(t, cfg)
 	ctx := context.Background()

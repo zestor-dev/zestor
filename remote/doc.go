@@ -23,6 +23,9 @@
 //     has, fn runs again on the newer value, so fn may run more than once and
 //     must be safe to repeat. It does not run under the store's write lock.
 //   - List filters run on the client, after the whole kind has been fetched.
+//     List, Keys, Values, and GetAll are each one call, so a bulk write stays
+//     atomic to that read. ListPage, KeysPage, and GetAllPage read one page,
+//     and a bulk write can land between pages.
 //   - The store's own errors survive the network, so errors.Is works for
 //     ErrClosed, ErrKeyNotFound and the others. Any other error arrives as
 //     its message only, unless the same error is given to WithErrors on both

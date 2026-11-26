@@ -636,6 +636,150 @@ func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error
 	return out, rows.Err()
 }
 
+var _ store.Pager[struct{}] = (*storePG[struct{}])(nil)
+
+// Page queries compare and order bytewise, matching Go string order and the
+// fallback sort a remote handler uses for a store without Pager. "C" is a
+// built-in collation, so this does not depend on the database default.
+const (
+	listPageQuery = `
+SELECT key, value FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2
+ ORDER BY key COLLATE "C"
+ LIMIT $3`
+	listPageAfterQuery = `
+SELECT key, value FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2 AND key COLLATE "C" > $3
+ ORDER BY key COLLATE "C"
+ LIMIT $4`
+	keysPageQuery = `
+SELECT key FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2
+ ORDER BY key COLLATE "C"
+ LIMIT $3`
+	keysPageAfterQuery = `
+SELECT key FROM zestor_kv
+ WHERE ns_id=$1 AND kind=$2 AND key COLLATE "C" > $3
+ ORDER BY key COLLATE "C"
+ LIMIT $4`
+	allPageQuery = `
+SELECT kind, key, value FROM zestor_kv
+ WHERE ns_id=$1
+ ORDER BY kind COLLATE "C", key COLLATE "C"
+ LIMIT $2`
+	allPageAfterQuery = `
+SELECT kind, key, value FROM zestor_kv
+ WHERE ns_id=$1 AND (kind COLLATE "C" > $2 OR (kind COLLATE "C" = $2 AND key COLLATE "C" > $3))
+ ORDER BY kind COLLATE "C", key COLLATE "C"
+ LIMIT $4`
+)
+
+func (s *storePG[T]) ListPage(ctx context.Context, kind string, after *string, limit int) ([]store.KeyValue[T], error) {
+	ctx, cancel, err := s.guardKind(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	var rows pgx.Rows
+	if after == nil {
+		rows, err = s.pool.Query(ctx, listPageQuery, s.ns, kind, limit)
+	} else {
+		rows, err = s.pool.Query(ctx, listPageAfterQuery, s.ns, kind, *after, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]store.KeyValue[T], 0, limit)
+	for rows.Next() {
+		var k string
+		var b []byte
+		if err := rows.Scan(&k, &b); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := s.codec.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, store.KeyValue[T]{Key: k, Value: v})
+	}
+	return out, rows.Err()
+}
+
+func (s *storePG[T]) KeysPage(ctx context.Context, kind string, after *string, limit int) ([]string, error) {
+	ctx, cancel, err := s.guardKind(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	var rows pgx.Rows
+	if after == nil {
+		rows, err = s.pool.Query(ctx, keysPageQuery, s.ns, kind, limit)
+	} else {
+		rows, err = s.pool.Query(ctx, keysPageAfterQuery, s.ns, kind, *after, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0, limit)
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func (s *storePG[T]) GetAllPage(ctx context.Context, after *store.PageCursor, limit int) ([]store.KindValue[T], error) {
+	ctx, cancel, err := s.guard(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	var rows pgx.Rows
+	if after == nil {
+		rows, err = s.pool.Query(ctx, allPageQuery, s.ns, limit)
+	} else {
+		rows, err = s.pool.Query(ctx, allPageAfterQuery, s.ns, after.Kind, after.Key, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]store.KindValue[T], 0, limit)
+	for rows.Next() {
+		var kind, key string
+		var b []byte
+		if err := rows.Scan(&kind, &key, &b); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := s.codec.Unmarshal(b, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, store.KindValue[T]{Kind: kind, Key: key, Value: v})
+	}
+	return out, rows.Err()
+}
+
 func (s *storePG[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
 	ctx, cancel, err := s.guardKind(ctx, kind)
 	if err != nil {

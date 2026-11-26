@@ -23,6 +23,9 @@ var (
 	// events queued ahead of the bad one are delivered first. The consumer's
 	// view is incomplete and must be rebuilt by re-listing and re-watching.
 	ErrDecode = errors.New("watch decode: stored value could not be decoded, re-list required")
+
+	// ErrPageLimit means a page was requested with a limit below 1.
+	ErrPageLimit = errors.New("page limit must be positive")
 )
 
 // Reader provides read-only access to the store.
@@ -153,6 +156,38 @@ type Store[T any] interface {
 //	}
 type Dumper interface {
 	Dump(ctx context.Context, w io.Writer) error
+}
+
+// PageCursor is a position in a GetAll page. The next page starts after it.
+type PageCursor struct {
+	Kind string
+	Key  string
+}
+
+// KindValue is one entry of a GetAll page, in (kind, key) order.
+type KindValue[T any] struct {
+	Kind  string
+	Key   string
+	Value T
+}
+
+// Pager reads a store in ascending key order, a page at a time. It is
+// optional, like Dumper: Store does not include it. A backend that does not
+// implement it still serves List, Keys, and GetAll.
+//
+// after is nil to start at the first key. A non-nil after, including a
+// pointer to the empty string, returns entries strictly greater than that
+// key. limit is the most entries to return and must be positive; fewer means
+// this is the last page. ListPage and KeysPage order by key. GetAllPage
+// orders by kind, then key. Comparison is bytewise, the same order Go uses
+// for strings.
+//
+// The pages of one walk are separate calls, so a bulk write can land between
+// them. List, Keys, and GetAll stay the single-call reads.
+type Pager[T any] interface {
+	ListPage(ctx context.Context, kind string, after *string, limit int) ([]KeyValue[T], error)
+	KeysPage(ctx context.Context, kind string, after *string, limit int) ([]string, error)
+	GetAllPage(ctx context.Context, after *PageCursor, limit int) ([]KindValue[T], error)
 }
 
 type KeyValue[T any] struct {

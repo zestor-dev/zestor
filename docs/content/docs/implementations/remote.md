@@ -74,6 +74,9 @@ protocol (binary and JSON) and over gRPC.
   runs again on the newer value, so it may run more than once and must be safe
   to repeat. It does not hold the store's write lock, and may call the store.
 - **`List` filters** run on the client, after the whole kind is fetched.
+  `List`, `Keys`, `Values`, and `GetAll` are each one call. `ListPage`,
+  `KeysPage`, and `GetAllPage` read one page, in ascending key order, and a
+  bulk write can land between pages.
 - **Errors.** The store's own errors keep their identity: `errors.Is(err,
   store.ErrKeyNotFound)` and the others work. Any other error, such as one a
   validator returns, arrives as its message only — unless you give the same
@@ -121,6 +124,13 @@ curl -H 'Content-Type: application/json' \
 
 curl -H 'Content-Type: application/json' -d '{"kind":"users","key":"alice"}' $B/Get
 # {"found":true, "value":"eyJuYW1lIjoiQWxpY2UiLC..."}
+```
+
+`page_size` reads one page. The token is opaque: pass `next_page_token` back as `page_token`. An empty token starts at the first key, and an empty `next_page_token` means this was the last page. `page_size` zero returns the whole kind in one response.
+
+```bash
+curl -H 'Content-Type: application/json' \
+  -d '{"kind":"users","page_size":100}' $B/List
 ```
 
 Read-only calls also accept GET, which proxies and browsers can cache:

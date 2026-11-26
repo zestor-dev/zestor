@@ -32,7 +32,8 @@ curl -H 'Content-Type: application/json' \
 
 The client keeps the store contract, with a few differences — `SetFn` may run
 `fn` more than once, `List` filters run on the client, and custom errors need
-`WithErrors` on both sides. See the
+`WithErrors` on both sides. `ListPage`, `KeysPage`, and `GetAllPage` read one
+page of a large kind. See the
 [remote store documentation](https://docs.zestor.dev/docs/implementations/remote/)
 for those, the options, and watching from the command line.
 

@@ -65,6 +65,70 @@ func BenchmarkList10k(b *testing.B) {
 	}
 }
 
+func BenchmarkListPage100(b *testing.B) {
+	s := benchStore(b)
+	p := s.(store.Pager[TestData])
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		got, err := p.ListPage(ctx, "k", nil, 100)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != 100 {
+			b.Fatalf("ListPage len = %d, want 100", len(got))
+		}
+	}
+}
+
+func BenchmarkKeysPage100(b *testing.B) {
+	s := benchStore(b)
+	p := s.(store.Pager[TestData])
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		got, err := p.KeysPage(ctx, "k", nil, 100)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != 100 {
+			b.Fatalf("KeysPage len = %d, want 100", len(got))
+		}
+	}
+}
+
+// BenchmarkListPages10k reads the whole kind as pages of 500. Compare it with
+// BenchmarkList10k, which reads the kind in one call.
+func BenchmarkListPages10k(b *testing.B) {
+	const page = 500
+	s := benchStore(b)
+	p := s.(store.Pager[TestData])
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var after *string
+		n := 0
+		for {
+			got, err := p.ListPage(ctx, "k", after, page)
+			if err != nil {
+				b.Fatal(err)
+			}
+			n += len(got)
+			if len(got) < page {
+				break
+			}
+			last := got[len(got)-1].Key
+			after = &last
+		}
+		if n != benchKindSize {
+			b.Fatalf("paged List len = %d, want %d", n, benchKindSize)
+		}
+	}
+}
+
 func BenchmarkSet(b *testing.B) {
 	s := benchStore(b)
 	ctx := context.Background()

@@ -18,8 +18,9 @@ service StoreService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // List returns every entry of a kind. Filters are functions, so clients
-  // apply them after the call.
+  // List returns the entries of a kind. Filters are functions, so clients
+  // apply them after the call. page_size zero returns every entry. A positive
+  // page_size returns one page in ascending key order.
   rpc List(ListRequest) returns (ListResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -28,10 +29,15 @@ service StoreService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // Keys returns the keys of a kind. page_size zero returns every key, in
+  // the store's order. A positive page_size returns one page in ascending
+  // key order.
   rpc Keys(KeysRequest) returns (KeysResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // GetAll returns every kind. page_size zero returns all of them. A positive
+  // page_size returns one page in ascending (kind, key) order.
   rpc GetAll(GetAllRequest) returns (GetAllResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -73,10 +79,19 @@ message GetResponse {
 
 message ListRequest {
   string kind = 1;
+  // page_size is the most entries to return. Zero returns the whole kind and
+  // ignores page_token.
+  int32 page_size = 2;
+  // page_token is empty to start at the first key, or the next_page_token of
+  // the previous page. It is opaque.
+  string page_token = 3;
 }
 
 message ListResponse {
   repeated Entry entries = 1;
+  // next_page_token is the page_token of the following page. Empty when
+  // page_size is zero or this page is the last.
+  string next_page_token = 2;
 }
 
 message CountRequest {
@@ -89,13 +104,35 @@ message CountResponse {
 
 message KeysRequest {
   string kind = 1;
+  // page_size is the most keys to return. Zero returns every key and ignores
+  // page_token.
+  int32 page_size = 2;
+  // page_token is empty to start at the first key, or the next_page_token of
+  // the previous page. It is opaque.
+  string page_token = 3;
 }
 
 message KeysResponse {
   repeated string keys = 1;
+  // next_page_token is the page_token of the following page. Empty when
+  // page_size is zero or this page is the last.
+  string next_page_token = 2;
 }
 
-message GetAllRequest {}
+// GetAllCursor is a position in a paged GetAll. The next page starts after it.
+message GetAllCursor {
+  string kind = 1;
+  string key = 2;
+}
+
+message GetAllRequest {
+  // page_size is the most entries to return, across kinds. Zero returns
+  // everything and ignores page_token.
+  int32 page_size = 1;
+  // page_token is unset to start at the beginning, or the next_page_token of
+  // the previous page.
+  GetAllCursor page_token = 2;
+}
 
 message KindEntries {
   string kind = 1;
@@ -104,6 +141,8 @@ message KindEntries {
 
 message GetAllResponse {
   repeated KindEntries kinds = 1;
+  // next_page_token is unset when page_size is zero or this page is the last.
+  GetAllCursor next_page_token = 2;
 }
 
 enum SetResult {

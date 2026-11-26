@@ -350,8 +350,14 @@ func (x *GetResponse) GetValue() []byte {
 }
 
 type ListRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	// page_size is the most entries to return. Zero returns the whole kind and
+	// ignores page_token.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is empty to start at the first key, or the next_page_token of
+	// the previous page. It is opaque.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -393,9 +399,26 @@ func (x *ListRequest) GetKind() string {
 	return ""
 }
 
+func (x *ListRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type ListResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Entries       []*Entry               `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Entries []*Entry               `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	// next_page_token is the page_token of the following page. Empty when
+	// page_size is zero or this page is the last.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -435,6 +458,13 @@ func (x *ListResponse) GetEntries() []*Entry {
 		return x.Entries
 	}
 	return nil
+}
+
+func (x *ListResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
 }
 
 type CountRequest struct {
@@ -526,8 +556,14 @@ func (x *CountResponse) GetCount() int64 {
 }
 
 type KeysRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	// page_size is the most keys to return. Zero returns every key and ignores
+	// page_token.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is empty to start at the first key, or the next_page_token of
+	// the previous page. It is opaque.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -569,9 +605,26 @@ func (x *KeysRequest) GetKind() string {
 	return ""
 }
 
+func (x *KeysRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *KeysRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
 type KeysResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Keys          []string               `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Keys  []string               `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	// next_page_token is the page_token of the following page. Empty when
+	// page_size is zero or this page is the last.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -613,15 +666,81 @@ func (x *KeysResponse) GetKeys() []string {
 	return nil
 }
 
-type GetAllRequest struct {
+func (x *KeysResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+// GetAllCursor is a position in a paged GetAll. The next page starts after it.
+type GetAllCursor struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAllCursor) Reset() {
+	*x = GetAllCursor{}
+	mi := &file_zestor_store_v1_store_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAllCursor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAllCursor) ProtoMessage() {}
+
+func (x *GetAllCursor) ProtoReflect() protoreflect.Message {
+	mi := &file_zestor_store_v1_store_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAllCursor.ProtoReflect.Descriptor instead.
+func (*GetAllCursor) Descriptor() ([]byte, []int) {
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetAllCursor) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *GetAllCursor) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type GetAllRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// page_size is the most entries to return, across kinds. Zero returns
+	// everything and ignores page_token.
+	PageSize int32 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// page_token is unset to start at the beginning, or the next_page_token of
+	// the previous page.
+	PageToken     *GetAllCursor `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAllRequest) Reset() {
 	*x = GetAllRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[9]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -633,7 +752,7 @@ func (x *GetAllRequest) String() string {
 func (*GetAllRequest) ProtoMessage() {}
 
 func (x *GetAllRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[9]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -646,7 +765,21 @@ func (x *GetAllRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAllRequest.ProtoReflect.Descriptor instead.
 func (*GetAllRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{9}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetAllRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *GetAllRequest) GetPageToken() *GetAllCursor {
+	if x != nil {
+		return x.PageToken
+	}
+	return nil
 }
 
 type KindEntries struct {
@@ -659,7 +792,7 @@ type KindEntries struct {
 
 func (x *KindEntries) Reset() {
 	*x = KindEntries{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[10]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -671,7 +804,7 @@ func (x *KindEntries) String() string {
 func (*KindEntries) ProtoMessage() {}
 
 func (x *KindEntries) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[10]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -684,7 +817,7 @@ func (x *KindEntries) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KindEntries.ProtoReflect.Descriptor instead.
 func (*KindEntries) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{10}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *KindEntries) GetKind() string {
@@ -702,15 +835,17 @@ func (x *KindEntries) GetEntries() []*Entry {
 }
 
 type GetAllResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kinds         []*KindEntries         `protobuf:"bytes,1,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kinds []*KindEntries         `protobuf:"bytes,1,rep,name=kinds,proto3" json:"kinds,omitempty"`
+	// next_page_token is unset when page_size is zero or this page is the last.
+	NextPageToken *GetAllCursor `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetAllResponse) Reset() {
 	*x = GetAllResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[11]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -722,7 +857,7 @@ func (x *GetAllResponse) String() string {
 func (*GetAllResponse) ProtoMessage() {}
 
 func (x *GetAllResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[11]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -735,12 +870,19 @@ func (x *GetAllResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAllResponse.ProtoReflect.Descriptor instead.
 func (*GetAllResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{11}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetAllResponse) GetKinds() []*KindEntries {
 	if x != nil {
 		return x.Kinds
+	}
+	return nil
+}
+
+func (x *GetAllResponse) GetNextPageToken() *GetAllCursor {
+	if x != nil {
+		return x.NextPageToken
 	}
 	return nil
 }
@@ -756,7 +898,7 @@ type SetRequest struct {
 
 func (x *SetRequest) Reset() {
 	*x = SetRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[12]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +910,7 @@ func (x *SetRequest) String() string {
 func (*SetRequest) ProtoMessage() {}
 
 func (x *SetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[12]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +923,7 @@ func (x *SetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetRequest.ProtoReflect.Descriptor instead.
 func (*SetRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{12}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SetRequest) GetKind() string {
@@ -814,7 +956,7 @@ type SetResponse struct {
 
 func (x *SetResponse) Reset() {
 	*x = SetResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[13]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -826,7 +968,7 @@ func (x *SetResponse) String() string {
 func (*SetResponse) ProtoMessage() {}
 
 func (x *SetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[13]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -839,7 +981,7 @@ func (x *SetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetResponse.ProtoReflect.Descriptor instead.
 func (*SetResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{13}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SetResponse) GetResult() SetResult {
@@ -859,7 +1001,7 @@ type SetManyRequest struct {
 
 func (x *SetManyRequest) Reset() {
 	*x = SetManyRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[14]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -871,7 +1013,7 @@ func (x *SetManyRequest) String() string {
 func (*SetManyRequest) ProtoMessage() {}
 
 func (x *SetManyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[14]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -884,7 +1026,7 @@ func (x *SetManyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetManyRequest.ProtoReflect.Descriptor instead.
 func (*SetManyRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{14}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetManyRequest) GetKind() string {
@@ -909,7 +1051,7 @@ type SetManyResponse struct {
 
 func (x *SetManyResponse) Reset() {
 	*x = SetManyResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[15]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -921,7 +1063,7 @@ func (x *SetManyResponse) String() string {
 func (*SetManyResponse) ProtoMessage() {}
 
 func (x *SetManyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[15]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -934,7 +1076,7 @@ func (x *SetManyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetManyResponse.ProtoReflect.Descriptor instead.
 func (*SetManyResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{15}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{16}
 }
 
 type CompareAndSetRequest struct {
@@ -950,7 +1092,7 @@ type CompareAndSetRequest struct {
 
 func (x *CompareAndSetRequest) Reset() {
 	*x = CompareAndSetRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[16]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +1104,7 @@ func (x *CompareAndSetRequest) String() string {
 func (*CompareAndSetRequest) ProtoMessage() {}
 
 func (x *CompareAndSetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[16]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +1117,7 @@ func (x *CompareAndSetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompareAndSetRequest.ProtoReflect.Descriptor instead.
 func (*CompareAndSetRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{16}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CompareAndSetRequest) GetKind() string {
@@ -1016,7 +1158,7 @@ type CompareAndSetResponse struct {
 
 func (x *CompareAndSetResponse) Reset() {
 	*x = CompareAndSetResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[17]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1028,7 +1170,7 @@ func (x *CompareAndSetResponse) String() string {
 func (*CompareAndSetResponse) ProtoMessage() {}
 
 func (x *CompareAndSetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[17]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1041,7 +1183,7 @@ func (x *CompareAndSetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompareAndSetResponse.ProtoReflect.Descriptor instead.
 func (*CompareAndSetResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{17}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CompareAndSetResponse) GetChanged() bool {
@@ -1061,7 +1203,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[18]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1073,7 +1215,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[18]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,7 +1228,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{18}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteRequest) GetKind() string {
@@ -1113,7 +1255,7 @@ type DeleteResponse struct {
 
 func (x *DeleteResponse) Reset() {
 	*x = DeleteResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[19]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1125,7 +1267,7 @@ func (x *DeleteResponse) String() string {
 func (*DeleteResponse) ProtoMessage() {}
 
 func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[19]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1280,7 @@ func (x *DeleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteResponse.ProtoReflect.Descriptor instead.
 func (*DeleteResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{19}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DeleteResponse) GetExisted() bool {
@@ -1174,7 +1316,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[20]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1186,7 +1328,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[20]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1199,7 +1341,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{20}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WatchRequest) GetKind() string {
@@ -1245,7 +1387,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[21]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1257,7 +1399,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[21]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1270,7 +1412,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{21}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Event) GetType() EventType {
@@ -1309,7 +1451,7 @@ type Subscribed struct {
 
 func (x *Subscribed) Reset() {
 	*x = Subscribed{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[22]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1463,7 @@ func (x *Subscribed) String() string {
 func (*Subscribed) ProtoMessage() {}
 
 func (x *Subscribed) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[22]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1476,7 @@ func (x *Subscribed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribed.ProtoReflect.Descriptor instead.
 func (*Subscribed) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{22}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{23}
 }
 
 type WatchResponse struct {
@@ -1351,7 +1493,7 @@ type WatchResponse struct {
 
 func (x *WatchResponse) Reset() {
 	*x = WatchResponse{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[23]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1363,7 +1505,7 @@ func (x *WatchResponse) String() string {
 func (*WatchResponse) ProtoMessage() {}
 
 func (x *WatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[23]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1376,7 +1518,7 @@ func (x *WatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchResponse.ProtoReflect.Descriptor instead.
 func (*WatchResponse) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{23}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *WatchResponse) GetMessage() isWatchResponse_Message {
@@ -1448,7 +1590,7 @@ type Failure struct {
 
 func (x *Failure) Reset() {
 	*x = Failure{}
-	mi := &file_zestor_store_v1_store_proto_msgTypes[24]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1602,7 @@ func (x *Failure) String() string {
 func (*Failure) ProtoMessage() {}
 
 func (x *Failure) ProtoReflect() protoreflect.Message {
-	mi := &file_zestor_store_v1_store_proto_msgTypes[24]
+	mi := &file_zestor_store_v1_store_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1615,7 @@ func (x *Failure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Failure.ProtoReflect.Descriptor instead.
 func (*Failure) Descriptor() ([]byte, []int) {
-	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{24}
+	return file_zestor_store_v1_store_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *Failure) GetReason() FailureReason {
@@ -1511,25 +1653,40 @@ const file_zestor_store_v1_store_proto_rawDesc = "" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"9\n" +
 	"\vGetResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value\"!\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value\"]\n" +
 	"\vListRequest\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\"@\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"h\n" +
 	"\fListResponse\x120\n" +
-	"\aentries\x18\x01 \x03(\v2\x16.zestor.store.v1.EntryR\aentries\"\"\n" +
+	"\aentries\x18\x01 \x03(\v2\x16.zestor.store.v1.EntryR\aentries\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\"\n" +
 	"\fCountRequest\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\"%\n" +
 	"\rCountResponse\x12\x14\n" +
-	"\x05count\x18\x01 \x01(\x03R\x05count\"!\n" +
+	"\x05count\x18\x01 \x01(\x03R\x05count\"]\n" +
 	"\vKeysRequest\x12\x12\n" +
-	"\x04kind\x18\x01 \x01(\tR\x04kind\"\"\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"J\n" +
 	"\fKeysResponse\x12\x12\n" +
-	"\x04keys\x18\x01 \x03(\tR\x04keys\"\x0f\n" +
-	"\rGetAllRequest\"S\n" +
+	"\x04keys\x18\x01 \x03(\tR\x04keys\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"4\n" +
+	"\fGetAllCursor\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\"j\n" +
+	"\rGetAllRequest\x12\x1b\n" +
+	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12<\n" +
+	"\n" +
+	"page_token\x18\x02 \x01(\v2\x1d.zestor.store.v1.GetAllCursorR\tpageToken\"S\n" +
 	"\vKindEntries\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x120\n" +
-	"\aentries\x18\x02 \x03(\v2\x16.zestor.store.v1.EntryR\aentries\"D\n" +
+	"\aentries\x18\x02 \x03(\v2\x16.zestor.store.v1.EntryR\aentries\"\x8b\x01\n" +
 	"\x0eGetAllResponse\x122\n" +
-	"\x05kinds\x18\x01 \x03(\v2\x1c.zestor.store.v1.KindEntriesR\x05kinds\"H\n" +
+	"\x05kinds\x18\x01 \x03(\v2\x1c.zestor.store.v1.KindEntriesR\x05kinds\x12E\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\v2\x1d.zestor.store.v1.GetAllCursorR\rnextPageToken\"H\n" +
 	"\n" +
 	"SetRequest\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x10\n" +
@@ -1623,7 +1780,7 @@ func file_zestor_store_v1_store_proto_rawDescGZIP() []byte {
 }
 
 var file_zestor_store_v1_store_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_zestor_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_zestor_store_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_zestor_store_v1_store_proto_goTypes = []any{
 	(SetResult)(0),                // 0: zestor.store.v1.SetResult
 	(EventType)(0),                // 1: zestor.store.v1.EventType
@@ -1637,60 +1794,63 @@ var file_zestor_store_v1_store_proto_goTypes = []any{
 	(*CountResponse)(nil),         // 9: zestor.store.v1.CountResponse
 	(*KeysRequest)(nil),           // 10: zestor.store.v1.KeysRequest
 	(*KeysResponse)(nil),          // 11: zestor.store.v1.KeysResponse
-	(*GetAllRequest)(nil),         // 12: zestor.store.v1.GetAllRequest
-	(*KindEntries)(nil),           // 13: zestor.store.v1.KindEntries
-	(*GetAllResponse)(nil),        // 14: zestor.store.v1.GetAllResponse
-	(*SetRequest)(nil),            // 15: zestor.store.v1.SetRequest
-	(*SetResponse)(nil),           // 16: zestor.store.v1.SetResponse
-	(*SetManyRequest)(nil),        // 17: zestor.store.v1.SetManyRequest
-	(*SetManyResponse)(nil),       // 18: zestor.store.v1.SetManyResponse
-	(*CompareAndSetRequest)(nil),  // 19: zestor.store.v1.CompareAndSetRequest
-	(*CompareAndSetResponse)(nil), // 20: zestor.store.v1.CompareAndSetResponse
-	(*DeleteRequest)(nil),         // 21: zestor.store.v1.DeleteRequest
-	(*DeleteResponse)(nil),        // 22: zestor.store.v1.DeleteResponse
-	(*WatchRequest)(nil),          // 23: zestor.store.v1.WatchRequest
-	(*Event)(nil),                 // 24: zestor.store.v1.Event
-	(*Subscribed)(nil),            // 25: zestor.store.v1.Subscribed
-	(*WatchResponse)(nil),         // 26: zestor.store.v1.WatchResponse
-	(*Failure)(nil),               // 27: zestor.store.v1.Failure
+	(*GetAllCursor)(nil),          // 12: zestor.store.v1.GetAllCursor
+	(*GetAllRequest)(nil),         // 13: zestor.store.v1.GetAllRequest
+	(*KindEntries)(nil),           // 14: zestor.store.v1.KindEntries
+	(*GetAllResponse)(nil),        // 15: zestor.store.v1.GetAllResponse
+	(*SetRequest)(nil),            // 16: zestor.store.v1.SetRequest
+	(*SetResponse)(nil),           // 17: zestor.store.v1.SetResponse
+	(*SetManyRequest)(nil),        // 18: zestor.store.v1.SetManyRequest
+	(*SetManyResponse)(nil),       // 19: zestor.store.v1.SetManyResponse
+	(*CompareAndSetRequest)(nil),  // 20: zestor.store.v1.CompareAndSetRequest
+	(*CompareAndSetResponse)(nil), // 21: zestor.store.v1.CompareAndSetResponse
+	(*DeleteRequest)(nil),         // 22: zestor.store.v1.DeleteRequest
+	(*DeleteResponse)(nil),        // 23: zestor.store.v1.DeleteResponse
+	(*WatchRequest)(nil),          // 24: zestor.store.v1.WatchRequest
+	(*Event)(nil),                 // 25: zestor.store.v1.Event
+	(*Subscribed)(nil),            // 26: zestor.store.v1.Subscribed
+	(*WatchResponse)(nil),         // 27: zestor.store.v1.WatchResponse
+	(*Failure)(nil),               // 28: zestor.store.v1.Failure
 }
 var file_zestor_store_v1_store_proto_depIdxs = []int32{
 	3,  // 0: zestor.store.v1.ListResponse.entries:type_name -> zestor.store.v1.Entry
-	3,  // 1: zestor.store.v1.KindEntries.entries:type_name -> zestor.store.v1.Entry
-	13, // 2: zestor.store.v1.GetAllResponse.kinds:type_name -> zestor.store.v1.KindEntries
-	0,  // 3: zestor.store.v1.SetResponse.result:type_name -> zestor.store.v1.SetResult
-	3,  // 4: zestor.store.v1.SetManyRequest.entries:type_name -> zestor.store.v1.Entry
-	1,  // 5: zestor.store.v1.WatchRequest.event_types:type_name -> zestor.store.v1.EventType
-	1,  // 6: zestor.store.v1.Event.type:type_name -> zestor.store.v1.EventType
-	25, // 7: zestor.store.v1.WatchResponse.subscribed:type_name -> zestor.store.v1.Subscribed
-	24, // 8: zestor.store.v1.WatchResponse.event:type_name -> zestor.store.v1.Event
-	27, // 9: zestor.store.v1.WatchResponse.failure:type_name -> zestor.store.v1.Failure
-	2,  // 10: zestor.store.v1.Failure.reason:type_name -> zestor.store.v1.FailureReason
-	4,  // 11: zestor.store.v1.StoreService.Get:input_type -> zestor.store.v1.GetRequest
-	6,  // 12: zestor.store.v1.StoreService.List:input_type -> zestor.store.v1.ListRequest
-	8,  // 13: zestor.store.v1.StoreService.Count:input_type -> zestor.store.v1.CountRequest
-	10, // 14: zestor.store.v1.StoreService.Keys:input_type -> zestor.store.v1.KeysRequest
-	12, // 15: zestor.store.v1.StoreService.GetAll:input_type -> zestor.store.v1.GetAllRequest
-	15, // 16: zestor.store.v1.StoreService.Set:input_type -> zestor.store.v1.SetRequest
-	17, // 17: zestor.store.v1.StoreService.SetMany:input_type -> zestor.store.v1.SetManyRequest
-	19, // 18: zestor.store.v1.StoreService.CompareAndSet:input_type -> zestor.store.v1.CompareAndSetRequest
-	21, // 19: zestor.store.v1.StoreService.Delete:input_type -> zestor.store.v1.DeleteRequest
-	23, // 20: zestor.store.v1.StoreService.Watch:input_type -> zestor.store.v1.WatchRequest
-	5,  // 21: zestor.store.v1.StoreService.Get:output_type -> zestor.store.v1.GetResponse
-	7,  // 22: zestor.store.v1.StoreService.List:output_type -> zestor.store.v1.ListResponse
-	9,  // 23: zestor.store.v1.StoreService.Count:output_type -> zestor.store.v1.CountResponse
-	11, // 24: zestor.store.v1.StoreService.Keys:output_type -> zestor.store.v1.KeysResponse
-	14, // 25: zestor.store.v1.StoreService.GetAll:output_type -> zestor.store.v1.GetAllResponse
-	16, // 26: zestor.store.v1.StoreService.Set:output_type -> zestor.store.v1.SetResponse
-	18, // 27: zestor.store.v1.StoreService.SetMany:output_type -> zestor.store.v1.SetManyResponse
-	20, // 28: zestor.store.v1.StoreService.CompareAndSet:output_type -> zestor.store.v1.CompareAndSetResponse
-	22, // 29: zestor.store.v1.StoreService.Delete:output_type -> zestor.store.v1.DeleteResponse
-	26, // 30: zestor.store.v1.StoreService.Watch:output_type -> zestor.store.v1.WatchResponse
-	21, // [21:31] is the sub-list for method output_type
-	11, // [11:21] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	12, // 1: zestor.store.v1.GetAllRequest.page_token:type_name -> zestor.store.v1.GetAllCursor
+	3,  // 2: zestor.store.v1.KindEntries.entries:type_name -> zestor.store.v1.Entry
+	14, // 3: zestor.store.v1.GetAllResponse.kinds:type_name -> zestor.store.v1.KindEntries
+	12, // 4: zestor.store.v1.GetAllResponse.next_page_token:type_name -> zestor.store.v1.GetAllCursor
+	0,  // 5: zestor.store.v1.SetResponse.result:type_name -> zestor.store.v1.SetResult
+	3,  // 6: zestor.store.v1.SetManyRequest.entries:type_name -> zestor.store.v1.Entry
+	1,  // 7: zestor.store.v1.WatchRequest.event_types:type_name -> zestor.store.v1.EventType
+	1,  // 8: zestor.store.v1.Event.type:type_name -> zestor.store.v1.EventType
+	26, // 9: zestor.store.v1.WatchResponse.subscribed:type_name -> zestor.store.v1.Subscribed
+	25, // 10: zestor.store.v1.WatchResponse.event:type_name -> zestor.store.v1.Event
+	28, // 11: zestor.store.v1.WatchResponse.failure:type_name -> zestor.store.v1.Failure
+	2,  // 12: zestor.store.v1.Failure.reason:type_name -> zestor.store.v1.FailureReason
+	4,  // 13: zestor.store.v1.StoreService.Get:input_type -> zestor.store.v1.GetRequest
+	6,  // 14: zestor.store.v1.StoreService.List:input_type -> zestor.store.v1.ListRequest
+	8,  // 15: zestor.store.v1.StoreService.Count:input_type -> zestor.store.v1.CountRequest
+	10, // 16: zestor.store.v1.StoreService.Keys:input_type -> zestor.store.v1.KeysRequest
+	13, // 17: zestor.store.v1.StoreService.GetAll:input_type -> zestor.store.v1.GetAllRequest
+	16, // 18: zestor.store.v1.StoreService.Set:input_type -> zestor.store.v1.SetRequest
+	18, // 19: zestor.store.v1.StoreService.SetMany:input_type -> zestor.store.v1.SetManyRequest
+	20, // 20: zestor.store.v1.StoreService.CompareAndSet:input_type -> zestor.store.v1.CompareAndSetRequest
+	22, // 21: zestor.store.v1.StoreService.Delete:input_type -> zestor.store.v1.DeleteRequest
+	24, // 22: zestor.store.v1.StoreService.Watch:input_type -> zestor.store.v1.WatchRequest
+	5,  // 23: zestor.store.v1.StoreService.Get:output_type -> zestor.store.v1.GetResponse
+	7,  // 24: zestor.store.v1.StoreService.List:output_type -> zestor.store.v1.ListResponse
+	9,  // 25: zestor.store.v1.StoreService.Count:output_type -> zestor.store.v1.CountResponse
+	11, // 26: zestor.store.v1.StoreService.Keys:output_type -> zestor.store.v1.KeysResponse
+	15, // 27: zestor.store.v1.StoreService.GetAll:output_type -> zestor.store.v1.GetAllResponse
+	17, // 28: zestor.store.v1.StoreService.Set:output_type -> zestor.store.v1.SetResponse
+	19, // 29: zestor.store.v1.StoreService.SetMany:output_type -> zestor.store.v1.SetManyResponse
+	21, // 30: zestor.store.v1.StoreService.CompareAndSet:output_type -> zestor.store.v1.CompareAndSetResponse
+	23, // 31: zestor.store.v1.StoreService.Delete:output_type -> zestor.store.v1.DeleteResponse
+	27, // 32: zestor.store.v1.StoreService.Watch:output_type -> zestor.store.v1.WatchResponse
+	23, // [23:33] is the sub-list for method output_type
+	13, // [13:23] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_zestor_store_v1_store_proto_init() }
@@ -1698,7 +1858,7 @@ func file_zestor_store_v1_store_proto_init() {
 	if File_zestor_store_v1_store_proto != nil {
 		return
 	}
-	file_zestor_store_v1_store_proto_msgTypes[23].OneofWrappers = []any{
+	file_zestor_store_v1_store_proto_msgTypes[24].OneofWrappers = []any{
 		(*WatchResponse_Subscribed)(nil),
 		(*WatchResponse_Event)(nil),
 		(*WatchResponse_Failure)(nil),
@@ -1709,7 +1869,7 @@ func file_zestor_store_v1_store_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_zestor_store_v1_store_proto_rawDesc), len(file_zestor_store_v1_store_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   25,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

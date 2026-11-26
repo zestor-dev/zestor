@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sync"
 
@@ -114,7 +115,9 @@ func (c *Client[T]) list(ctx context.Context, kind string) ([]*storev1.Entry, er
 	return resp.Msg.GetEntries(), nil
 }
 
-// List fetches the whole kind and applies filters on the client.
+// List fetches the whole kind in one call and applies filters on the client.
+// The single call is one snapshot of the backend's read. For one page of a
+// large kind, use ListPage.
 func (c *Client[T]) List(ctx context.Context, kind string, filter ...store.FilterFunc[T]) (map[string]T, error) {
 	entries, err := c.list(ctx, kind)
 	if err != nil {
@@ -202,6 +205,100 @@ func (c *Client[T]) GetAll(ctx context.Context) (map[string]map[string]T, error)
 		out[k.GetKind()] = m
 	}
 	return out, nil
+}
+
+func pageLimit(limit int) error {
+	if limit < 1 || limit > math.MaxInt32 {
+		return store.ErrPageLimit
+	}
+	return nil
+}
+
+// ListPage reads one page of kind in ascending key order. pageToken is empty
+// to start at the first key, or the token returned with the previous page.
+// limit is the most entries to return and must be positive. The returned
+// token is empty on the last page.
+//
+// A walk of several pages is not one snapshot: a bulk write can land between
+// pages. List is the single-call read.
+func (c *Client[T]) ListPage(ctx context.Context, kind, pageToken string, limit int) ([]store.KeyValue[T], string, error) {
+	if err := pageLimit(limit); err != nil {
+		return nil, "", err
+	}
+	if err := c.guard(ctx); err != nil {
+		return nil, "", err
+	}
+	defer c.done()
+	resp, err := c.rpc.List(ctx, connect.NewRequest(&storev1.ListRequest{
+		Kind: kind, PageSize: int32(limit), PageToken: pageToken,
+	}))
+	if err != nil {
+		return nil, "", c.fail(ctx, err)
+	}
+	out := make([]store.KeyValue[T], 0, len(resp.Msg.GetEntries()))
+	for _, e := range resp.Msg.GetEntries() {
+		v, err := c.decode(e.GetValue())
+		if err != nil {
+			return nil, "", err
+		}
+		out = append(out, store.KeyValue[T]{Key: e.GetKey(), Value: v})
+	}
+	return out, resp.Msg.GetNextPageToken(), nil
+}
+
+// KeysPage reads one page of keys in ascending order. pageToken and limit
+// are as for ListPage.
+func (c *Client[T]) KeysPage(ctx context.Context, kind, pageToken string, limit int) ([]string, string, error) {
+	if err := pageLimit(limit); err != nil {
+		return nil, "", err
+	}
+	if err := c.guard(ctx); err != nil {
+		return nil, "", err
+	}
+	defer c.done()
+	resp, err := c.rpc.Keys(ctx, connect.NewRequest(&storev1.KeysRequest{
+		Kind: kind, PageSize: int32(limit), PageToken: pageToken,
+	}))
+	if err != nil {
+		return nil, "", c.fail(ctx, err)
+	}
+	return resp.Msg.GetKeys(), resp.Msg.GetNextPageToken(), nil
+}
+
+// GetAllPage reads one page of every kind in ascending (kind, key) order.
+// cursor is nil to start at the beginning, or the cursor returned with the
+// previous page. The returned cursor is nil on the last page.
+func (c *Client[T]) GetAllPage(ctx context.Context, cursor *store.PageCursor, limit int) ([]store.KindValue[T], *store.PageCursor, error) {
+	if err := pageLimit(limit); err != nil {
+		return nil, nil, err
+	}
+	if err := c.guard(ctx); err != nil {
+		return nil, nil, err
+	}
+	defer c.done()
+	req := &storev1.GetAllRequest{PageSize: int32(limit)}
+	if cursor != nil {
+		req.PageToken = &storev1.GetAllCursor{Kind: cursor.Kind, Key: cursor.Key}
+	}
+	resp, err := c.rpc.GetAll(ctx, connect.NewRequest(req))
+	if err != nil {
+		return nil, nil, c.fail(ctx, err)
+	}
+	var out []store.KindValue[T]
+	for _, k := range resp.Msg.GetKinds() {
+		for _, e := range k.GetEntries() {
+			v, err := c.decode(e.GetValue())
+			if err != nil {
+				return nil, nil, err
+			}
+			out = append(out, store.KindValue[T]{Kind: k.GetKind(), Key: e.GetKey(), Value: v})
+		}
+	}
+	var next *store.PageCursor
+	if cur := resp.Msg.GetNextPageToken(); cur != nil {
+		next = &store.PageCursor{Kind: cur.GetKind(), Key: cur.GetKey()}
+	}
+	return out, next, nil
 }
 
 func (c *Client[T]) Set(ctx context.Context, kind, key string, value T) (store.SetResult, error) {
