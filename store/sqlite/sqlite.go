@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -163,6 +164,21 @@ func NewWithStoreOptions[T any](ctx context.Context, o Options, so store.StoreOp
 	}, nil
 }
 
+// unmarshalAs decodes data into dest. When the store's type is already a
+// pointer, &v is a pointer to a nil pointer. The codec module these builds
+// require does not allocate that pointer for protobuf, so it is allocated
+// here and Unmarshal receives the value itself.
+func unmarshalAs[T any](c codec.Codec, data []byte, dest *T) error {
+	rv := reflect.ValueOf(dest).Elem()
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			rv.Set(reflect.New(rv.Type().Elem()))
+		}
+		return c.Unmarshal(data, rv.Interface())
+	}
+	return c.Unmarshal(data, dest)
+}
+
 func (s *sqLiteStore[T]) validate(kind string, v T) error {
 	if fn, ok := s.validateFns[kind]; ok {
 		return fn(v)
@@ -177,7 +193,7 @@ func (s *sqLiteStore[T]) unchanged(cur, enc []byte, next T) (bool, error) {
 		return bytes.Equal(cur, enc), nil
 	}
 	var prev T
-	if err := s.codec.Unmarshal(cur, &prev); err != nil {
+	if err := unmarshalAs(s.codec, cur, &prev); err != nil {
 		return false, err
 	}
 	return s.compareFn(prev, next), nil
@@ -246,7 +262,7 @@ func (s *sqLiteStore[T]) Get(ctx context.Context, kind, key string) (T, bool, er
 		return zero, false, err
 	}
 	var v T
-	if err := s.codec.Unmarshal(blob, &v); err != nil {
+	if err := unmarshalAs(s.codec, blob, &v); err != nil {
 		return zero, false, err
 	}
 	return v, true, nil
@@ -272,7 +288,7 @@ func (s *sqLiteStore[T]) List(ctx context.Context, kind string, filter ...store.
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		include := true
@@ -345,7 +361,7 @@ func (s *sqLiteStore[T]) Values(ctx context.Context, kind string) ([]store.KeyVa
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -459,7 +475,7 @@ func (s *sqLiteStore[T]) SetFn(ctx context.Context, kind, key string, fn func(v 
 		return false, err
 	}
 	var cur T
-	if err := s.codec.Unmarshal(curBytes, &cur); err != nil {
+	if err := unmarshalAs(s.codec, curBytes, &cur); err != nil {
 		return false, err
 	}
 
@@ -653,7 +669,7 @@ func (s *sqLiteStore[T]) Delete(ctx context.Context, kind, key string) (bool, T,
 		return false, zero, err
 	}
 	var prev T
-	if err := s.codec.Unmarshal(prevBytes, &prev); err != nil {
+	if err := unmarshalAs(s.codec, prevBytes, &prev); err != nil {
 		return false, zero, err
 	}
 
@@ -711,7 +727,7 @@ func (s *sqLiteStore[T]) snapshot(ctx context.Context, kind string) ([]*store.Ev
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
@@ -758,7 +774,7 @@ func (s *sqLiteStore[T]) Dump(ctx context.Context, w io.Writer) error {
 			return err
 		}
 		var decoded T
-		if err := s.codec.Unmarshal(value, &decoded); err != nil {
+		if err := unmarshalAs(s.codec, value, &decoded); err != nil {
 			if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=<undecodable>\n",
 				kind, key, ver, len(value), updated); err != nil {
 				return err
@@ -796,7 +812,7 @@ func (s *sqLiteStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, e
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		if _, ok := out[kind]; !ok {
@@ -836,7 +852,7 @@ func (s *sqLiteStore[T]) ListPage(ctx context.Context, kind string, after *strin
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -901,7 +917,7 @@ func (s *sqLiteStore[T]) GetAllPage(ctx context.Context, after *store.PageCursor
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KindValue[T]{Kind: kind, Key: key, Value: v})

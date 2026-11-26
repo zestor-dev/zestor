@@ -229,7 +229,7 @@ func (w *watch[T]) decode(e *storev1.Event) (*store.Event[T], error) {
 		return nil, fmt.Errorf("%w: unknown event type %v for %s/%s", store.ErrDecode, e.GetType(), w.kind, e.GetKey())
 	}
 	var v T
-	if err := w.client.codec.Unmarshal(e.GetValue(), &v); err != nil {
+	if err := unmarshalAs(w.client.codec, e.GetValue(), &v); err != nil {
 		return nil, fmt.Errorf("%w: %s/%s: %v", store.ErrDecode, w.kind, e.GetKey(), err)
 	}
 	return &store.Event[T]{Kind: w.kind, Name: e.GetKey(), EventType: et, Object: v, Replay: e.GetReplay()}, nil

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -278,6 +279,21 @@ func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
 	return nil
 }
 
+// unmarshalAs decodes data into dest. When the store's type is already a
+// pointer, &v is a pointer to a nil pointer. The codec module these builds
+// require does not allocate that pointer for protobuf, so it is allocated
+// here and Unmarshal receives the value itself.
+func unmarshalAs[T any](c codec.Codec, data []byte, dest *T) error {
+	rv := reflect.ValueOf(dest).Elem()
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			rv.Set(reflect.New(rv.Type().Elem()))
+		}
+		return c.Unmarshal(data, rv.Interface())
+	}
+	return c.Unmarshal(data, dest)
+}
+
 func (s *storePG[T]) validate(kind string, v T) error {
 	if fn, ok := s.validateFns[kind]; ok {
 		return fn(v)
@@ -292,7 +308,7 @@ func (s *storePG[T]) unchanged(cur, enc []byte, next T) (bool, error) {
 		return bytes.Equal(cur, enc), nil
 	}
 	var prev T
-	if err := s.codec.Unmarshal(cur, &prev); err != nil {
+	if err := unmarshalAs(s.codec, cur, &prev); err != nil {
 		return false, err
 	}
 	return s.compareFn(prev, next), nil
@@ -560,7 +576,7 @@ func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error)
 		return zero, false, err
 	}
 	var v T
-	if err := s.codec.Unmarshal(b, &v); err != nil {
+	if err := unmarshalAs(s.codec, b, &v); err != nil {
 		return zero, false, err
 	}
 	return v, true, nil
@@ -588,7 +604,7 @@ func (s *storePG[T]) List(ctx context.Context, kind string, filter ...store.Filt
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		ok := true
@@ -665,7 +681,7 @@ func (s *storePG[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -695,7 +711,7 @@ func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		if _, ok := out[kind]; !ok {
@@ -773,7 +789,7 @@ func (s *storePG[T]) ListPage(ctx context.Context, kind string, after *string, l
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -842,7 +858,7 @@ func (s *storePG[T]) GetAllPage(ctx context.Context, after *store.PageCursor, li
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KindValue[T]{Kind: kind, Key: key, Value: v})
@@ -994,7 +1010,7 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 	if err != nil {
 		return false, err
 	}
-	if err := s.codec.Unmarshal(curBytes, &cur); err != nil {
+	if err := unmarshalAs(s.codec, curBytes, &cur); err != nil {
 		return false, err
 	}
 
@@ -1173,7 +1189,7 @@ func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, err
 		return false, zero, err
 	}
 	var prev T
-	if err := s.codec.Unmarshal(prevBytes, &prev); err != nil {
+	if err := unmarshalAs(s.codec, prevBytes, &prev); err != nil {
 		return false, zero, err
 	}
 
@@ -1300,7 +1316,7 @@ func (s *storePG[T]) snapshot(ctx context.Context, kind string) ([]*store.Event[
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
@@ -1365,7 +1381,7 @@ SELECT id, key, etype, value
 			break
 		}
 		var obj T
-		if err := s.codec.Unmarshal(val, &obj); err != nil {
+		if err := unmarshalAs(s.codec, val, &obj); err != nil {
 			// Skip the row. Leaving the cursor in front of it makes every
 			// later drain retry it forever, and every later Watch fails.
 			decodeErr = fmt.Errorf("%w: outbox row %d (%s/%s): %v", store.ErrDecode, id, kind, name, err)
@@ -1677,7 +1693,7 @@ func (s *storePG[T]) Dump(ctx context.Context, w io.Writer) error {
 		}
 		updated := ts.UTC().Format(time.RFC3339Nano)
 		var decoded T
-		if err := s.codec.Unmarshal(value, &decoded); err != nil {
+		if err := unmarshalAs(s.codec, value, &decoded); err != nil {
 			if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=<undecodable>\n",
 				kind, key, ver, len(value), updated); err != nil {
 				return err

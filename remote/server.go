@@ -35,7 +35,7 @@ func (h *server[T]) fail(err error) error { return toConnectError(err, h.known) 
 
 func (h *server[T]) decode(b []byte) (T, error) {
 	var v T
-	if err := h.codec.Unmarshal(b, &v); err != nil {
+	if err := unmarshalAs(h.codec, b, &v); err != nil {
 		return v, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("decode value: %w", err))
 	}
 	return v, nil

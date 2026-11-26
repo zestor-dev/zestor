@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -77,36 +76,49 @@ func TestSetFnAllowsUnstableEncoding(t *testing.T) {
 	}
 }
 
-// conflictMem reports a compare-and-set conflict without changing the value,
-// which is what a codec that does not round-trip looks like to the client.
-type conflictMem struct {
+// conflictOnce reports one compare-and-set conflict and leaves the stored
+// value alone. A concurrent writer can change a key and restore it before
+// the client's next read, which is the same observation: conflict, then the
+// value this attempt already saw. That has to be a retry.
+type conflictOnce struct {
 	store.Store[storetestValue]
+	n atomic.Int32
 }
 
-func (conflictMem) SetFn(context.Context, string, string, func(storetestValue) (storetestValue, error)) (bool, error) {
-	return false, errConflict
+func (c *conflictOnce) SetFn(ctx context.Context, kind, key string, fn func(storetestValue) (storetestValue, error)) (bool, error) {
+	if c.n.Add(1) == 1 {
+		return false, errConflict
+	}
+	return c.Store.SetFn(ctx, kind, key, fn)
 }
 
-func TestSetFnStopsWhenValueDoesNotChange(t *testing.T) {
+func TestSetFnRetriesWhenConflictRestoresValue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	backend := conflictMem{Store: gomap.NewMemStore[storetestValue](store.StoreOptions[storetestValue]{})}
+	backend := &conflictOnce{Store: gomap.NewMemStore[storetestValue](store.StoreOptions[storetestValue]{})}
 	if _, err := backend.Set(ctx, "k", "a", storetestValue{N: 1}); err != nil {
 		t.Fatal(err)
 	}
 	client := serveClient(t, backend, &codec.JSON{})
 
 	calls := 0
-	_, err := client.SetFn(ctx, "k", "a", func(v storetestValue) (storetestValue, error) {
+	changed, err := client.SetFn(ctx, "k", "a", func(v storetestValue) (storetestValue, error) {
 		calls++
 		v.N++
 		return v, nil
 	})
-	if !errors.Is(err, ErrCodecConflict) {
-		t.Fatalf("SetFn error = %v, want ErrCodecConflict", err)
+	if err != nil {
+		t.Fatalf("SetFn: %v after %d calls", err, calls)
 	}
-	if calls != 1 {
-		t.Fatalf("fn ran %d times, want 1", calls)
+	if !changed {
+		t.Fatal("SetFn reported changed=false")
+	}
+	if calls != 2 {
+		t.Fatalf("fn ran %d times, want 2", calls)
+	}
+	got, ok, err := client.Get(ctx, "k", "a")
+	if err != nil || !ok || got.N != 2 {
+		t.Fatalf("Get = %+v ok=%v err=%v, want N=2", got, ok, err)
 	}
 }
 

@@ -170,7 +170,7 @@ Popular alternatives you might implement:
 
 ## Round trip
 
-`Marshal` may encode one value as different bytes on each call. `Unmarshal(Marshal(v))` must produce a value equal to `v`. Remote `SetFn` compares those values, so a codec that inserts whitespace still applies the write once. A codec that does not round-trip makes `SetFn` return `remote.ErrCodecConflict` instead of retrying until the context ends.
+`Marshal` may encode one value as different bytes on each call. `Unmarshal(Marshal(v))` must produce a value equal to `v`. Remote `SetFn` compares those values, so a codec that inserts whitespace still applies the write once. Retries stop when the caller's context ends.
 
 ## Codec Consistency
 
