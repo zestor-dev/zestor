@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -278,6 +279,21 @@ func (s *storePG[T]) seedOutboxCursor(ctx context.Context) error {
 	return nil
 }
 
+// unmarshalAs decodes data into dest. When the store's type is already a
+// pointer, &v is a pointer to a nil pointer. The codec module these builds
+// require does not allocate that pointer for protobuf, so it is allocated
+// here and Unmarshal receives the value itself.
+func unmarshalAs[T any](c codec.Codec, data []byte, dest *T) error {
+	rv := reflect.ValueOf(dest).Elem()
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			rv.Set(reflect.New(rv.Type().Elem()))
+		}
+		return c.Unmarshal(data, rv.Interface())
+	}
+	return c.Unmarshal(data, dest)
+}
+
 func (s *storePG[T]) validate(kind string, v T) error {
 	if fn, ok := s.validateFns[kind]; ok {
 		return fn(v)
@@ -292,7 +308,7 @@ func (s *storePG[T]) unchanged(cur, enc []byte, next T) (bool, error) {
 		return bytes.Equal(cur, enc), nil
 	}
 	var prev T
-	if err := s.codec.Unmarshal(cur, &prev); err != nil {
+	if err := unmarshalAs(s.codec, cur, &prev); err != nil {
 		return false, err
 	}
 	return s.compareFn(prev, next), nil
@@ -368,9 +384,69 @@ func (s *storePG[T]) guardKind(ctx context.Context, kind string) (context.Contex
 	return s.guard(ctx)
 }
 
+// schemaCurrentQuery is true when the tables, indexes, notify function, and
+// v2 trigger are present and the legacy trigger is gone. It reads catalogs
+// only, so it does not lock zestor_kv or zestor_outbox.
+const schemaCurrentQuery = `
+SELECT
+    to_regclass('zestor_kv') IS NOT NULL
+    AND to_regclass('zestor_outbox') IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_indexes
+        WHERE schemaname = current_schema() AND indexname = 'idx_kv_kind'
+    )
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_indexes
+        WHERE schemaname = current_schema() AND indexname = 'idx_outbox_kind'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = current_schema() AND p.proname = 'zestor_notify_v2'
+    )
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_zestor_outbox_notify_v2'
+          AND tgrelid = to_regclass('zestor_outbox')
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_zestor_outbox_notify'
+          AND tgrelid = to_regclass('zestor_outbox')
+    )`
+
+type rowQueryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func schemaCurrent(ctx context.Context, q rowQueryer) (bool, error) {
+	var current bool
+	if err := q.QueryRow(ctx, schemaCurrentQuery).Scan(&current); err != nil {
+		return false, err
+	}
+	return current, nil
+}
+
 func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
+
+	// Opening a store must not take locks that conflict with writers once the
+	// schema is in place. CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT
+	// EXISTS lock zestor_kv and zestor_outbox even when the objects already
+	// exist, and a write that already holds those row locks deadlocks with
+	// that (SQLSTATE 40P01). A current schema is a catalog read.
+	current, err := schemaCurrent(ctx, s.pool)
+	if err != nil {
+		return err
+	}
+	if current {
+		return nil
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -379,11 +455,18 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		_ = tx.Rollback(ctx)
 	}()
 
-	// First, before any table lock. Two stores starting together used to race
-	// on CREATE TABLE, and rebuilding the trigger on every start took an
-	// exclusive lock that blocked writers for the whole statement.
+	// First, before any table lock. Two stores creating the schema together
+	// used to race on CREATE TABLE, and rebuilding the trigger on every start
+	// took an exclusive lock that blocked writers for the whole statement.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, schemaLockID); err != nil {
 		return err
+	}
+	current, err = schemaCurrent(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if current {
+		return tx.Commit(ctx)
 	}
 
 	stmts := []string{
@@ -410,9 +493,12 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_outbox_kind ON zestor_outbox(ns_id, kind, id);`,
 
 		// The payload carries only what the listener needs to pick a drain, kind
-		// last so it may contain anything. Replacing the function does not lock
-		// the outbox. The trigger is created only when it is missing: dropping
-		// it on every start takes an exclusive lock and blocks writers.
+		// last so it may contain anything. This runs only when the schema is
+		// not current: replacing the function locks it while a writer is inside
+		// the trigger. A body change needs a new function name so the catalog
+		// check fails and this path installs it. The trigger is created only
+		// when it is missing: dropping it on every start takes an exclusive
+		// lock and blocks writers.
 		`CREATE OR REPLACE FUNCTION zestor_notify_v2() RETURNS TRIGGER AS $$
 		   BEGIN
 		     PERFORM pg_notify('` + notifyChannel + `', NEW.ns_id::text || '|' || NEW.kind);
@@ -490,7 +576,7 @@ func (s *storePG[T]) Get(ctx context.Context, kind, key string) (T, bool, error)
 		return zero, false, err
 	}
 	var v T
-	if err := s.codec.Unmarshal(b, &v); err != nil {
+	if err := unmarshalAs(s.codec, b, &v); err != nil {
 		return zero, false, err
 	}
 	return v, true, nil
@@ -518,7 +604,7 @@ func (s *storePG[T]) List(ctx context.Context, kind string, filter ...store.Filt
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		ok := true
@@ -595,7 +681,7 @@ func (s *storePG[T]) Values(ctx context.Context, kind string) ([]store.KeyValue[
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -625,7 +711,7 @@ func (s *storePG[T]) GetAll(ctx context.Context) (map[string]map[string]T, error
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(blob, &v); err != nil {
+		if err := unmarshalAs(s.codec, blob, &v); err != nil {
 			return nil, err
 		}
 		if _, ok := out[kind]; !ok {
@@ -703,7 +789,7 @@ func (s *storePG[T]) ListPage(ctx context.Context, kind string, after *string, l
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KeyValue[T]{Key: k, Value: v})
@@ -772,7 +858,7 @@ func (s *storePG[T]) GetAllPage(ctx context.Context, after *store.PageCursor, li
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, store.KindValue[T]{Kind: kind, Key: key, Value: v})
@@ -924,7 +1010,7 @@ func (s *storePG[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (
 	if err != nil {
 		return false, err
 	}
-	if err := s.codec.Unmarshal(curBytes, &cur); err != nil {
+	if err := unmarshalAs(s.codec, curBytes, &cur); err != nil {
 		return false, err
 	}
 
@@ -1103,7 +1189,7 @@ func (s *storePG[T]) Delete(ctx context.Context, kind, key string) (bool, T, err
 		return false, zero, err
 	}
 	var prev T
-	if err := s.codec.Unmarshal(prevBytes, &prev); err != nil {
+	if err := unmarshalAs(s.codec, prevBytes, &prev); err != nil {
 		return false, zero, err
 	}
 
@@ -1230,7 +1316,7 @@ func (s *storePG[T]) snapshot(ctx context.Context, kind string) ([]*store.Event[
 			return nil, err
 		}
 		var v T
-		if err := s.codec.Unmarshal(b, &v); err != nil {
+		if err := unmarshalAs(s.codec, b, &v); err != nil {
 			return nil, err
 		}
 		out = append(out, &store.Event[T]{Kind: kind, Name: k, EventType: store.EventTypeCreate, Object: v})
@@ -1295,7 +1381,7 @@ SELECT id, key, etype, value
 			break
 		}
 		var obj T
-		if err := s.codec.Unmarshal(val, &obj); err != nil {
+		if err := unmarshalAs(s.codec, val, &obj); err != nil {
 			// Skip the row. Leaving the cursor in front of it makes every
 			// later drain retry it forever, and every later Watch fails.
 			decodeErr = fmt.Errorf("%w: outbox row %d (%s/%s): %v", store.ErrDecode, id, kind, name, err)
@@ -1607,7 +1693,7 @@ func (s *storePG[T]) Dump(ctx context.Context, w io.Writer) error {
 		}
 		updated := ts.UTC().Format(time.RFC3339Nano)
 		var decoded T
-		if err := s.codec.Unmarshal(value, &decoded); err != nil {
+		if err := unmarshalAs(s.codec, value, &decoded); err != nil {
 			if _, err := fmt.Fprintf(bw, "%s/%s v%d (%dB) %s | value=<undecodable>\n",
 				kind, key, ver, len(value), updated); err != nil {
 				return err

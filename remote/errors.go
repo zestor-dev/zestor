@@ -16,7 +16,9 @@ import (
 var ErrDisconnected = errors.New("remote watch disconnected: re-list required")
 
 // errConflict is the CompareAndSet mismatch, returned by the function the
-// server passes to SetFn. It never reaches a caller: the client retries.
+// server passes to SetFn. It never reaches a caller: the client reads again
+// and repeats. A conflict whose next read is the same value is still a retry.
+// Another writer can change the key and restore it before that read.
 var errConflict = errors.New("stored value changed")
 
 // failureFor names err for the wire. known is checked after the store's own

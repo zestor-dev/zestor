@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/wrapperspb"
+
 	"github.com/zestor-dev/zestor/codec"
 	"github.com/zestor-dev/zestor/store"
 	"github.com/zestor-dev/zestor/store/sqlite"
@@ -315,6 +317,50 @@ func TestFailedWriteRollsBack(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("Count=%d after a rolled-back SetMany, want 2 (seed + after) — the failed batch was partially committed", n)
+	}
+}
+
+// Stores decode into &v. When T is a message pointer, that is a pointer to a
+// pointer, which the protobuf codec used to reject.
+func TestProtobufPointerRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, err := sqlite.New[*wrapperspb.StringValue](ctx, sqlite.Options{
+		DSN:   dsn(t),
+		Codec: &codec.Protobuf{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	want := wrapperspb.String("protobuf")
+	res, err := s.Set(ctx, "notes", "a", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != store.SetCreated {
+		t.Fatalf("Set = %s, want created", res)
+	}
+	got, ok, err := s.Get(ctx, "notes", "a")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.GetValue() != want.GetValue() {
+		t.Fatalf("Get = %q, want %q", got.GetValue(), want.GetValue())
+	}
+	listed, err := s.List(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed["a"].GetValue() != want.GetValue() {
+		t.Fatalf("List = %q, want %q", listed["a"].GetValue(), want.GetValue())
+	}
+	res, err = s.Set(ctx, "notes", "a", wrapperspb.String("protobuf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != store.SetUnchanged {
+		t.Fatalf("second Set = %s, want unchanged", res)
 	}
 }
 

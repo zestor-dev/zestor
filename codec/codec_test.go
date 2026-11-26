@@ -85,4 +85,27 @@ func TestProtobufRejectsNonMessages(t *testing.T) {
 	if err := c.Unmarshal(nil, &sampleData{}); err == nil {
 		t.Fatal("Unmarshal() error = nil, want error")
 	}
+	var notMessage *sampleData
+	if err := c.Unmarshal(nil, &notMessage); err == nil {
+		t.Fatal("Unmarshal() into a pointer to a non-message error = nil, want error")
+	}
+}
+
+// Stores decode with Unmarshal(data, &v). When T is *wrapperspb.StringValue,
+// that argument is a pointer to a nil message pointer.
+func TestProtobufUnmarshalPointerToMessagePointer(t *testing.T) {
+	c := &Protobuf{}
+	want := wrapperspb.String("protobuf")
+	data, err := c.Marshal(want)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var got *wrapperspb.StringValue
+	if err := c.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if got == nil || got.GetValue() != want.GetValue() {
+		t.Fatalf("Unmarshal() = %#v, want %q", got, want.GetValue())
+	}
 }

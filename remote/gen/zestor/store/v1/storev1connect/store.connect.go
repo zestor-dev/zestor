@@ -74,10 +74,12 @@ type StoreServiceClient interface {
 	Set(context.Context, *connect.Request[v1.SetRequest]) (*connect.Response[v1.SetResponse], error)
 	// SetMany writes several entries of one kind in a single store call.
 	SetMany(context.Context, *connect.Request[v1.SetManyRequest]) (*connect.Response[v1.SetManyResponse], error)
-	// CompareAndSet replaces the value at kind/key only if its stored encoding
-	// still equals expected. It is how a client runs SetFn: read, apply the
-	// function locally, then write only if nobody wrote in between. A mismatch
-	// fails with FAILURE_REASON_CONFLICT and the client retries from the read.
+	// CompareAndSet replaces the value at kind/key only if it still decodes
+	// equal to expected. The check compares values, not bytes, so a codec may
+	// encode one value differently each time. It is how a client runs SetFn:
+	// read, apply the function locally, then write only if nobody wrote in
+	// between. A mismatch fails with FAILURE_REASON_CONFLICT and the client
+	// retries from the read.
 	CompareAndSet(context.Context, *connect.Request[v1.CompareAndSetRequest]) (*connect.Response[v1.CompareAndSetResponse], error)
 	Delete(context.Context, *connect.Request[v1.DeleteRequest]) (*connect.Response[v1.DeleteResponse], error)
 	// Watch streams the events of one kind. The first message is always
@@ -248,10 +250,12 @@ type StoreServiceHandler interface {
 	Set(context.Context, *connect.Request[v1.SetRequest]) (*connect.Response[v1.SetResponse], error)
 	// SetMany writes several entries of one kind in a single store call.
 	SetMany(context.Context, *connect.Request[v1.SetManyRequest]) (*connect.Response[v1.SetManyResponse], error)
-	// CompareAndSet replaces the value at kind/key only if its stored encoding
-	// still equals expected. It is how a client runs SetFn: read, apply the
-	// function locally, then write only if nobody wrote in between. A mismatch
-	// fails with FAILURE_REASON_CONFLICT and the client retries from the read.
+	// CompareAndSet replaces the value at kind/key only if it still decodes
+	// equal to expected. The check compares values, not bytes, so a codec may
+	// encode one value differently each time. It is how a client runs SetFn:
+	// read, apply the function locally, then write only if nobody wrote in
+	// between. A mismatch fails with FAILURE_REASON_CONFLICT and the client
+	// retries from the read.
 	CompareAndSet(context.Context, *connect.Request[v1.CompareAndSetRequest]) (*connect.Response[v1.CompareAndSetResponse], error)
 	Delete(context.Context, *connect.Request[v1.DeleteRequest]) (*connect.Response[v1.DeleteResponse], error)
 	// Watch streams the events of one kind. The first message is always

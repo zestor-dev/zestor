@@ -70,9 +70,13 @@ protocol (binary and JSON) and over gRPC.
 ### Where it differs from a local store
 
 - **`SetFn`** reads the value, runs `fn` on the client, and writes the result
-  only if the stored value has not changed in the meantime. If it has, `fn`
-  runs again on the newer value, so it may run more than once and must be safe
-  to repeat. It does not hold the store's write lock, and may call the store.
+  only if the stored value still decodes equal to the one `fn` saw. A codec
+  may encode that value as different bytes; that is not a conflict. If another
+  writer changed it, `fn` runs again, so it may run more than once and must be
+  safe to repeat, including when the next read is the value `fn` already saw.
+  Another writer can change the key and restore it. Give `ctx` a deadline to
+  bound contention with other writers. `fn` does not hold the store's write lock,
+  and may call the store.
 - **`List` filters** run on the client, after the whole kind is fetched.
   `List`, `Keys`, `Values`, and `GetAll` are each one call. `ListPage`,
   `KeysPage`, and `GetAllPage` read one page, in ascending key order, and a

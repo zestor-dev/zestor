@@ -1,7 +1,6 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -36,7 +35,7 @@ func (h *server[T]) fail(err error) error { return toConnectError(err, h.known) 
 
 func (h *server[T]) decode(b []byte) (T, error) {
 	var v T
-	if err := h.codec.Unmarshal(b, &v); err != nil {
+	if err := unmarshalAs(h.codec, b, &v); err != nil {
 		return v, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("decode value: %w", err))
 	}
 	return v, nil
@@ -226,13 +225,19 @@ func (h *server[T]) CompareAndSet(ctx context.Context, req *connect.Request[stor
 	if err != nil {
 		return nil, err
 	}
-	expected := req.Msg.GetExpected()
+	// expected is whatever the client read. Re-encoding cur and comparing
+	// those bytes treats a codec that emits different bytes for one value as
+	// a concurrent writer, and the client then retries until its context ends.
+	expected, err := h.decode(req.Msg.GetExpected())
+	if err != nil {
+		return nil, err
+	}
 	changed, err := h.store.SetFn(ctx, req.Msg.GetKind(), req.Msg.GetKey(), func(cur T) (T, error) {
-		b, err := h.codec.Marshal(cur)
+		got, err := roundTrip(h.codec, cur)
 		if err != nil {
 			return cur, err
 		}
-		if !bytes.Equal(b, expected) {
+		if !sameValue(got, expected) {
 			return cur, errConflict
 		}
 		return next, nil

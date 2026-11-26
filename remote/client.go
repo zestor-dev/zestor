@@ -77,7 +77,7 @@ func (c *Client[T]) fail(ctx context.Context, err error) error {
 
 func (c *Client[T]) decode(b []byte) (T, error) {
 	var v T
-	if err := c.codec.Unmarshal(b, &v); err != nil {
+	if err := unmarshalAs(c.codec, b, &v); err != nil {
 		return v, fmt.Errorf("decode value: %w", err)
 	}
 	return v, nil
@@ -326,9 +326,14 @@ func (c *Client[T]) Set(ctx context.Context, kind, key string, value T) (store.S
 }
 
 // SetFn reads the value, applies fn on the client, and writes the result only
-// if the stored value is still the one fn saw. When another writer got there
-// first, it reads again and repeats, so fn may run more than once. fn does not
-// hold the store's write lock and may call the store.
+// if that value is still stored. Equality is the decoded value, so a codec
+// may emit different bytes for the same value. When another writer committed
+// first, SetFn reads again and repeats, which means fn may run more than once
+// and must be safe to repeat. A conflict is always a retry, including when
+// the next read is the value this attempt already saw: another writer can
+// change the key and restore it. The loop ends when ctx ends, so a deadline
+// bounds contention. fn does not hold the store's write lock and may call
+// the store.
 func (c *Client[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
 	if err := c.guard(ctx); err != nil {
 		return false, err
