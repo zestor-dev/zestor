@@ -47,10 +47,12 @@ service StoreService {
   // SetMany writes several entries of one kind in a single store call.
   rpc SetMany(SetManyRequest) returns (SetManyResponse);
 
-  // CompareAndSet replaces the value at kind/key only if its stored encoding
-  // still equals expected. It is how a client runs SetFn: read, apply the
-  // function locally, then write only if nobody wrote in between. A mismatch
-  // fails with FAILURE_REASON_CONFLICT and the client retries from the read.
+  // CompareAndSet replaces the value at kind/key only if it still decodes
+  // equal to expected. The check compares values, not bytes, so a codec may
+  // encode one value differently each time. It is how a client runs SetFn:
+  // read, apply the function locally, then write only if nobody wrote in
+  // between. A mismatch fails with FAILURE_REASON_CONFLICT and the client
+  // retries from the read.
   rpc CompareAndSet(CompareAndSetRequest) returns (CompareAndSetResponse);
 
   rpc Delete(DeleteRequest) returns (DeleteResponse);
@@ -173,6 +175,7 @@ message CompareAndSetRequest {
   string kind = 1;
   string key = 2;
   // expected is the encoding the client read and applied its function to.
+  // The server decodes it and compares that value with the stored one.
   bytes expected = 3;
   bytes value = 4;
 }

@@ -76,6 +76,7 @@ s, _ := sqlite.New[*pb.User](sqlite.Options{
 ```
 
 **Requirements:**
+- The store's type parameter is the message pointer (`*pb.User`). Reads allocate it: stores decode into `&v`, and when that type is already a pointer the codec receives a pointer to a nil pointer
 - Values must implement `proto.Message`
 - Requires `.proto` schema files
 
@@ -166,6 +167,10 @@ Popular alternatives you might implement:
 - **MessagePack** — Compact binary JSON
 - **CBOR** — Concise Binary Object Representation
 - **Gob** — Go's native binary format
+
+## Round trip
+
+`Marshal` may encode one value as different bytes on each call. `Unmarshal(Marshal(v))` must produce a value equal to `v`. Remote `SetFn` compares those values, so a codec that inserts whitespace still applies the write once. A codec that does not round-trip makes `SetFn` return `remote.ErrCodecConflict` instead of retrying until the context ends.
 
 ## Codec Consistency
 

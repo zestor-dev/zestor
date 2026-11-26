@@ -18,10 +18,10 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512 h1:MuexbngFLOQMCnDJSfSWPxEICmUpX3ANb3Zju30kN8E=
-github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512/go.mod h1:ZzA+ycqOEfVVQ1e62Fs0G15zXfEI0WA9eAZhKshCs7w=
-github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512 h1:ATH1BPS5wZXeJuYXlqDsWazygOCovCZE81cM5n6aSBk=
-github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512/go.mod h1:tvsCi/SGFqxq+33+lQFpFC7C13er9QpVEMf1xi+1G2w=
+github.com/zestor-dev/zestor v0.0.5-0.20261126093621-b932d21d159e h1:aFJYJukUM1cDnSZY8tRUu9/faXyQHvL+pJ+AzOGAA6Q=
+github.com/zestor-dev/zestor v0.0.5-0.20261126093621-b932d21d159e/go.mod h1:JX9pc95VZj4rg1012U8OjhKA0bq6kljpjLW1pi05OBw=
+github.com/zestor-dev/zestor/codec v0.0.0-20261126093621-b932d21d159e h1:/CcDpGUsWvmiCWrKBvUP/2TuC71aOhTPGbpF8SPbU0c=
+github.com/zestor-dev/zestor/codec v0.0.0-20261126093621-b932d21d159e/go.mod h1:/KDR5YdH2ULY45bUNlmoXRJ/LHLBvhO6M3Smsj3fvJ0=
 go.yaml.in/yaml/v2 v2.4.5 h1:a5nxWvYi94DRl6QSLlTbLpVmutgx2qg8EVjnJtuFpwI=
 go.yaml.in/yaml/v2 v2.4.5/go.mod h1:gMZqIpDtDqOfM0uNfy0SkpRhvUryYH0Z6wdMYcacYXQ=
 golang.org/x/sync v0.24.0 h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=

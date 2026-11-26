@@ -19,9 +19,13 @@
 // A Client keeps the store contract, with these differences:
 //
 //   - SetFn runs fn on the client, against a value it has just read, and
-//     writes the result only if the stored value has not changed since. If it
-//     has, fn runs again on the newer value, so fn may run more than once and
-//     must be safe to repeat. It does not run under the store's write lock.
+//     writes the result only if the stored value still decodes equal to that
+//     one. A codec may encode the same value as different bytes. If the
+//     stored value changed, fn runs again, so it may run more than once and
+//     must be safe to repeat. A conflict that leaves the decoded value
+//     unchanged returns ErrCodecConflict instead of retrying. Otherwise the
+//     loop runs until ctx ends, so a deadline bounds contention with other
+//     writers. fn does not run under the store's write lock.
 //   - List filters run on the client, after the whole kind has been fetched.
 //     List, Keys, Values, and GetAll are each one call, so a bulk write stays
 //     atomic to that read. ListPage, KeysPage, and GetAllPage read one page,

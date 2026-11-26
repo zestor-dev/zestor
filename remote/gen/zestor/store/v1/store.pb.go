@@ -1084,6 +1084,7 @@ type CompareAndSetRequest struct {
 	Kind  string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
 	Key   string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	// expected is the encoding the client read and applied its function to.
+	// The server decodes it and compares that value with the stored one.
 	Expected      []byte `protobuf:"bytes,3,opt,name=expected,proto3" json:"expected,omitempty"`
 	Value         []byte `protobuf:"bytes,4,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields

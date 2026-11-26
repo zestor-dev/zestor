@@ -326,14 +326,22 @@ func (c *Client[T]) Set(ctx context.Context, kind, key string, value T) (store.S
 }
 
 // SetFn reads the value, applies fn on the client, and writes the result only
-// if the stored value is still the one fn saw. When another writer got there
-// first, it reads again and repeats, so fn may run more than once. fn does not
-// hold the store's write lock and may call the store.
+// if that value is still stored. Equality is the decoded value, so a codec
+// may emit different bytes for the same value. When another writer committed
+// first, SetFn reads again and repeats, which means fn may run more than once
+// and must be safe to repeat. If a conflict is reported but the value read
+// back has not changed, it returns ErrCodecConflict instead of retrying; a
+// codec whose Unmarshal(Marshal(v)) is not equal to v would otherwise retry
+// until ctx ends. A deadline on ctx is how a caller bounds a key that other
+// writers keep changing. fn does not hold the store's write lock and may call
+// the store.
 func (c *Client[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T, error)) (bool, error) {
 	if err := c.guard(ctx); err != nil {
 		return false, err
 	}
 	defer c.done()
+	var seen T
+	var haveSeen bool
 	for {
 		if err := ctx.Err(); err != nil {
 			return false, err
@@ -348,6 +356,15 @@ func (c *Client[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T
 		cur, err := c.decode(got.Msg.GetValue())
 		if err != nil {
 			return false, err
+		}
+		// snap is taken before fn. fn may mutate a pointer value, and the
+		// next read has to be compared with the value this attempt observed.
+		snap, err := roundTrip(c.codec, cur)
+		if err != nil {
+			return false, err
+		}
+		if haveSeen && sameValue(snap, seen) {
+			return false, ErrCodecConflict
 		}
 		next, err := fn(cur)
 		if err != nil {
@@ -366,6 +383,8 @@ func (c *Client[T]) SetFn(ctx context.Context, kind, key string, fn func(v T) (T
 		if err != nil {
 			err = c.fail(ctx, err)
 			if errors.Is(err, errConflict) {
+				seen = snap
+				haveSeen = true
 				continue
 			}
 			return false, err

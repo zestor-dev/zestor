@@ -14,10 +14,10 @@ github.com/ncruces/go-strftime v1.1.0 h1:vtPmPWMkb539RGV9WpWT9EwJGvrOCKvMNI4obWL
 github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2KmZ9Fj7xeG/g=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512 h1:MuexbngFLOQMCnDJSfSWPxEICmUpX3ANb3Zju30kN8E=
-github.com/zestor-dev/zestor v0.0.4-0.20260808040959-14d21efa5512/go.mod h1:ZzA+ycqOEfVVQ1e62Fs0G15zXfEI0WA9eAZhKshCs7w=
-github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512 h1:ATH1BPS5wZXeJuYXlqDsWazygOCovCZE81cM5n6aSBk=
-github.com/zestor-dev/zestor/codec v0.0.0-20260808040959-14d21efa5512/go.mod h1:tvsCi/SGFqxq+33+lQFpFC7C13er9QpVEMf1xi+1G2w=
+github.com/zestor-dev/zestor v0.0.5-0.20261126093621-b932d21d159e h1:aFJYJukUM1cDnSZY8tRUu9/faXyQHvL+pJ+AzOGAA6Q=
+github.com/zestor-dev/zestor v0.0.5-0.20261126093621-b932d21d159e/go.mod h1:JX9pc95VZj4rg1012U8OjhKA0bq6kljpjLW1pi05OBw=
+github.com/zestor-dev/zestor/codec v0.0.0-20261126093621-b932d21d159e h1:/CcDpGUsWvmiCWrKBvUP/2TuC71aOhTPGbpF8SPbU0c=
+github.com/zestor-dev/zestor/codec v0.0.0-20261126093621-b932d21d159e/go.mod h1:/KDR5YdH2ULY45bUNlmoXRJ/LHLBvhO6M3Smsj3fvJ0=
 go.yaml.in/yaml/v2 v2.4.5 h1:a5nxWvYi94DRl6QSLlTbLpVmutgx2qg8EVjnJtuFpwI=
 go.yaml.in/yaml/v2 v2.4.5/go.mod h1:gMZqIpDtDqOfM0uNfy0SkpRhvUryYH0Z6wdMYcacYXQ=
 golang.org/x/mod v0.42.0 h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=

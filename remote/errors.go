@@ -16,8 +16,15 @@ import (
 var ErrDisconnected = errors.New("remote watch disconnected: re-list required")
 
 // errConflict is the CompareAndSet mismatch, returned by the function the
-// server passes to SetFn. It never reaches a caller: the client retries.
+// server passes to SetFn. It never reaches a caller: the client retries when
+// the stored value actually changed.
 var errConflict = errors.New("stored value changed")
+
+// ErrCodecConflict means SetFn was told the stored value changed, then read
+// the same value back. The codec's Unmarshal(Marshal(v)) is not equal to v,
+// so another attempt would conflict again. SetFn returns this instead of
+// retrying until the context ends.
+var ErrCodecConflict = errors.New("remote: compare-and-set conflicted without the stored value changing")
 
 // failureFor names err for the wire. known is checked after the store's own
 // errors, so a validator cannot shadow them.

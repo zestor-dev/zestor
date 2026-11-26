@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/zestor-dev/zestor/codec"
 	"github.com/zestor-dev/zestor/store"
@@ -238,6 +239,153 @@ func TestNewDoesNotLockOutbox(t *testing.T) {
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("New blocked behind an ACCESS SHARE lock, so it is still taking an exclusive lock")
+	}
+}
+
+// Writers hold row locks that conflict with the ShareLock and
+// AccessExclusiveLock taken by CREATE INDEX and CREATE TABLE, even when the
+// objects already exist. Opening another store while those writes run used
+// to fail the write with SQLSTATE 40P01.
+func TestOpenDuringWritesDoesNotDeadlock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	s := newStore[TestData](t, nextNamespace())
+	defer s.Close()
+	if _, err := s.Set(ctx, "k", "a", TestData{Name: "v"}); err != nil {
+		t.Fatal(err)
+	}
+
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n := 0
+			for ctx.Err() == nil {
+				n++
+				_, err := s.Set(ctx, "k", "a", TestData{Name: "v", Value: n})
+				if err != nil && ctx.Err() == nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+
+	for range 6 {
+		opened, err := postgres.New[TestData](ctx, postgres.Options{
+			ConnString: getPostgresConn(),
+			Codec:      &codec.JSON{},
+			Namespace:  nextNamespace(),
+			Timeout:    3 * time.Second,
+		})
+		if err != nil && ctx.Err() == nil {
+			t.Fatalf("New while writes are in flight: %v", err)
+		}
+		if opened != nil {
+			opened.Close()
+		}
+		select {
+		case err := <-errCh:
+			t.Fatalf("write failed while opening stores: %v", err)
+		default:
+		}
+	}
+	cancel()
+	wg.Wait()
+	select {
+	case err := <-errCh:
+		t.Fatalf("write failed while opening stores: %v", err)
+	default:
+	}
+}
+
+// RowExclusiveLock conflicts with the locks CREATE INDEX and CREATE TABLE
+// take. A current schema must open without waiting for them.
+func TestNewDoesNotLockTablesWhenSchemaExists(t *testing.T) {
+	ctx := context.Background()
+	existing := newStore[TestData](t, nextNamespace())
+	existing.Close()
+
+	conn, err := pgx.Connect(ctx, getPostgresConn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, table := range []string{"zestor_kv", "zestor_outbox"} {
+		if _, err := tx.Exec(ctx, `LOCK TABLE `+table+` IN ROW EXCLUSIVE MODE`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		openCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		s, err := postgres.New[TestData](openCtx, postgres.Options{
+			ConnString: getPostgresConn(),
+			Codec:      &codec.JSON{},
+			Namespace:  nextNamespace(),
+			Timeout:    2 * time.Second,
+		})
+		if s != nil {
+			s.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("New while writers hold the tables: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("New blocked on schema locks while writers hold the tables")
+	}
+}
+
+func TestProtobufPointerRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, err := postgres.New[*wrapperspb.StringValue](ctx, postgres.Options{
+		ConnString: getPostgresConn(),
+		Codec:      &codec.Protobuf{},
+		Namespace:  nextNamespace(),
+		Timeout:    30 * time.Second,
+	})
+	if err != nil {
+		reportPostgresErr(t, err)
+	}
+	defer s.Close()
+
+	want := wrapperspb.String("protobuf")
+	res, err := s.Set(ctx, "notes", "a", want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res != store.SetCreated {
+		t.Fatalf("Set = %s, want created", res)
+	}
+	got, ok, err := s.Get(ctx, "notes", "a")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.GetValue() != want.GetValue() {
+		t.Fatalf("Get = %q, want %q", got.GetValue(), want.GetValue())
+	}
+	listed, err := s.List(ctx, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed["a"].GetValue() != want.GetValue() {
+		t.Fatalf("List = %q, want %q", listed["a"].GetValue(), want.GetValue())
 	}
 }
 

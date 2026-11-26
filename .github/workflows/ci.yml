@@ -68,7 +68,7 @@ jobs:
           fi
 
   modules:
-    name: Module graph
+    name: Standalone modules
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -76,18 +76,21 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            remote/go.sum
+            store/sqlite/go.sum
+            store/postgres/go.sum
 
-      # The workspace hides broken requires from every other job, so check the
-      # published module graph explicitly with GOWORK=off. This is what catches
-      # a submodule pinned to a version nobody can fetch — the state that made
-      # store/sqlite and store/postgres impossible to `go get`.
-      - name: Submodule requires resolve without the workspace
+      # The workspace hides broken requires from every other job. Compile each
+      # module with GOWORK=off, which is how a consumer builds it. go test
+      # -run '^$' compiles the packages and their tests without running any,
+      # so this does not need Postgres. It also fails when a require cannot
+      # be downloaded.
+      - name: Build submodules without the workspace
         run: |
           for m in remote store/sqlite store/postgres; do
-            echo "::group::go mod download $m"
-            (cd "$m" && GOWORK=off go mod download \
-              github.com/zestor-dev/zestor \
-              github.com/zestor-dev/zestor/codec) || exit 1
+            echo "::group::GOWORK=off $m"
+            (cd "$m" && GOWORK=off go test -run '^$' ./...) || exit 1
             echo "::endgroup::"
           done
 

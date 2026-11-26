@@ -368,9 +368,69 @@ func (s *storePG[T]) guardKind(ctx context.Context, kind string) (context.Contex
 	return s.guard(ctx)
 }
 
+// schemaCurrentQuery is true when the tables, indexes, notify function, and
+// v2 trigger are present and the legacy trigger is gone. It reads catalogs
+// only, so it does not lock zestor_kv or zestor_outbox.
+const schemaCurrentQuery = `
+SELECT
+    to_regclass('zestor_kv') IS NOT NULL
+    AND to_regclass('zestor_outbox') IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_indexes
+        WHERE schemaname = current_schema() AND indexname = 'idx_kv_kind'
+    )
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_indexes
+        WHERE schemaname = current_schema() AND indexname = 'idx_outbox_kind'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = current_schema() AND p.proname = 'zestor_notify_v2'
+    )
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_zestor_outbox_notify_v2'
+          AND tgrelid = to_regclass('zestor_outbox')
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger
+        WHERE NOT tgisinternal
+          AND tgname = 'trg_zestor_outbox_notify'
+          AND tgrelid = to_regclass('zestor_outbox')
+    )`
+
+type rowQueryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func schemaCurrent(ctx context.Context, q rowQueryer) (bool, error) {
+	var current bool
+	if err := q.QueryRow(ctx, schemaCurrentQuery).Scan(&current); err != nil {
+		return false, err
+	}
+	return current, nil
+}
+
 func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
+
+	// Opening a store must not take locks that conflict with writers once the
+	// schema is in place. CREATE TABLE IF NOT EXISTS and CREATE INDEX IF NOT
+	// EXISTS lock zestor_kv and zestor_outbox even when the objects already
+	// exist, and a write that already holds those row locks deadlocks with
+	// that (SQLSTATE 40P01). A current schema is a catalog read.
+	current, err := schemaCurrent(ctx, s.pool)
+	if err != nil {
+		return err
+	}
+	if current {
+		return nil
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -379,11 +439,18 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		_ = tx.Rollback(ctx)
 	}()
 
-	// First, before any table lock. Two stores starting together used to race
-	// on CREATE TABLE, and rebuilding the trigger on every start took an
-	// exclusive lock that blocked writers for the whole statement.
+	// First, before any table lock. Two stores creating the schema together
+	// used to race on CREATE TABLE, and rebuilding the trigger on every start
+	// took an exclusive lock that blocked writers for the whole statement.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, schemaLockID); err != nil {
 		return err
+	}
+	current, err = schemaCurrent(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if current {
+		return tx.Commit(ctx)
 	}
 
 	stmts := []string{
@@ -410,9 +477,12 @@ func (s *storePG[T]) ensureSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_outbox_kind ON zestor_outbox(ns_id, kind, id);`,
 
 		// The payload carries only what the listener needs to pick a drain, kind
-		// last so it may contain anything. Replacing the function does not lock
-		// the outbox. The trigger is created only when it is missing: dropping
-		// it on every start takes an exclusive lock and blocks writers.
+		// last so it may contain anything. This runs only when the schema is
+		// not current: replacing the function locks it while a writer is inside
+		// the trigger. A body change needs a new function name so the catalog
+		// check fails and this path installs it. The trigger is created only
+		// when it is missing: dropping it on every start takes an exclusive
+		// lock and blocks writers.
 		`CREATE OR REPLACE FUNCTION zestor_notify_v2() RETURNS TRIGGER AS $$
 		   BEGIN
 		     PERFORM pg_notify('` + notifyChannel + `', NEW.ns_id::text || '|' || NEW.kind);
