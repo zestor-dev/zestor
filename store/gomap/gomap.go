@@ -2,6 +2,8 @@ package gomap
 
 import (
 	"bufio"
+	"cmp"
+	"container/heap"
 	"context"
 	"fmt"
 	"io"
@@ -411,4 +413,158 @@ func (s *memStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, erro
 		out[kind] = cloneMap(m)
 	}
 	return out, nil
+}
+
+var _ store.Pager[struct{}] = (*memStore[struct{}])(nil)
+
+func (s *memStore[T]) ListPage(ctx context.Context, kind string, after *string, limit int) ([]store.KeyValue[T], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := requireKind(kind); err != nil {
+		return nil, err
+	}
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, store.ErrClosed
+	}
+	keys := smallestKeys(s.kinds[kind], after, limit)
+	out := make([]store.KeyValue[T], len(keys))
+	m := s.kinds[kind]
+	for i, k := range keys {
+		out[i] = store.KeyValue[T]{Key: k, Value: m[k]}
+	}
+	return out, nil
+}
+
+func (s *memStore[T]) KeysPage(ctx context.Context, kind string, after *string, limit int) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := requireKind(kind); err != nil {
+		return nil, err
+	}
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, store.ErrClosed
+	}
+	return smallestKeys(s.kinds[kind], after, limit), nil
+}
+
+func (s *memStore[T]) GetAllPage(ctx context.Context, after *store.PageCursor, limit int) ([]store.KindValue[T], error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, store.ErrClosed
+	}
+	h := &kindHeap[T]{rows: make([]store.KindValue[T], 0, limit)}
+	for kind, m := range s.kinds {
+		for key, v := range m {
+			if after != nil && !afterCursor(kind, key, *after) {
+				continue
+			}
+			row := store.KindValue[T]{Kind: kind, Key: key, Value: v}
+			if h.Len() < limit {
+				heap.Push(h, row)
+				continue
+			}
+			if kindBefore(row, h.rows[0]) {
+				h.rows[0] = row
+				heap.Fix(h, 0)
+			}
+		}
+	}
+	out := h.rows
+	slices.SortFunc(out, func(a, b store.KindValue[T]) int {
+		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Key, b.Key))
+	})
+	return out, nil
+}
+
+// smallestKeys returns the lowest limit keys of m that are strictly after
+// after, in ascending order. It keeps only that many candidates, so a short
+// page does not allocate a slice of the whole kind.
+func smallestKeys[T any](m map[string]T, after *string, limit int) []string {
+	h := make(maxStrings, 0, limit)
+	for k := range m {
+		if after != nil && k <= *after {
+			continue
+		}
+		if len(h) < limit {
+			heap.Push(&h, k)
+			continue
+		}
+		if k < h[0] {
+			h[0] = k
+			heap.Fix(&h, 0)
+		}
+	}
+	slices.Sort(h)
+	return h
+}
+
+// maxStrings is a max-heap of strings, so the root is the greatest candidate
+// and a smaller key can replace it.
+type maxStrings []string
+
+func (h maxStrings) Len() int           { return len(h) }
+func (h maxStrings) Less(i, j int) bool { return h[i] > h[j] }
+func (h maxStrings) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *maxStrings) Push(x any)        { *h = append(*h, x.(string)) }
+func (h *maxStrings) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
+}
+
+// kindHeap is a max-heap of entries, ordered by kind then key.
+type kindHeap[T any] struct {
+	rows []store.KindValue[T]
+}
+
+func (h kindHeap[T]) Len() int { return len(h.rows) }
+func (h kindHeap[T]) Less(i, j int) bool {
+	return kindBefore(h.rows[j], h.rows[i])
+}
+func (h kindHeap[T]) Swap(i, j int) { h.rows[i], h.rows[j] = h.rows[j], h.rows[i] }
+func (h *kindHeap[T]) Push(x any) {
+	h.rows = append(h.rows, x.(store.KindValue[T]))
+}
+func (h *kindHeap[T]) Pop() any {
+	old := h.rows
+	n := len(old)
+	x := old[n-1]
+	h.rows = old[:n-1]
+	return x
+}
+
+func kindBefore[T any](a, b store.KindValue[T]) bool {
+	if a.Kind != b.Kind {
+		return a.Kind < b.Kind
+	}
+	return a.Key < b.Key
+}
+
+// afterCursor reports whether kind/key is strictly after c.
+func afterCursor(kind, key string, c store.PageCursor) bool {
+	if kind != c.Kind {
+		return kind > c.Kind
+	}
+	return key > c.Key
 }

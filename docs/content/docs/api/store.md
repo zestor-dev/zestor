@@ -78,6 +78,20 @@ type Store[T any] interface {
 }
 ```
 
+### Pager[T any]
+
+Optional. Reads one kind, or the whole store, in ascending bytewise key order, a page at a time. `Store` does not include it. `limit` must be positive, and a shorter page is the last one. `after` nil starts at the first key; a non-nil `after` returns keys strictly greater than that key, including when the key is empty.
+
+The pages of one walk are separate calls, so a bulk write can land between them. `List`, `Keys`, and `GetAll` stay the single-call reads.
+
+```go
+type Pager[T any] interface {
+    ListPage(ctx context.Context, kind string, after *string, limit int) ([]KeyValue[T], error)
+    KeysPage(ctx context.Context, kind string, after *string, limit int) ([]string, error)
+    GetAllPage(ctx context.Context, after *PageCursor, limit int) ([]KindValue[T], error)
+}
+```
+
 ---
 
 ## Types

@@ -40,7 +40,17 @@ CREATE INDEX IF NOT EXISTS idx_kv_kind ON zestor_kv(kind);
 	countQuery  = `SELECT COUNT(*) FROM zestor_kv WHERE kind=?;`
 	keysQuery   = `SELECT key FROM zestor_kv WHERE kind=?;`
 	valuesQuery = `SELECT key, value FROM zestor_kv WHERE kind=?;`
-	setQuery    = `INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?) ON CONFLICT(kind,key) DO NOTHING;`
+
+	// Page queries compare and order bytewise, the same order Go uses for
+	// strings. BINARY is SQLite's default; naming it keeps a database opened
+	// with another collation on the same page order.
+	listPageQuery      = `SELECT key, value FROM zestor_kv WHERE kind=? ORDER BY key COLLATE BINARY LIMIT ?;`
+	listPageAfterQuery = `SELECT key, value FROM zestor_kv WHERE kind=? AND key COLLATE BINARY > ? ORDER BY key COLLATE BINARY LIMIT ?;`
+	keysPageQuery      = `SELECT key FROM zestor_kv WHERE kind=? ORDER BY key COLLATE BINARY LIMIT ?;`
+	keysPageAfterQuery = `SELECT key FROM zestor_kv WHERE kind=? AND key COLLATE BINARY > ? ORDER BY key COLLATE BINARY LIMIT ?;`
+	allPageQuery       = `SELECT kind, key, value FROM zestor_kv ORDER BY kind COLLATE BINARY, key COLLATE BINARY LIMIT ?;`
+	allPageAfterQuery  = `SELECT kind, key, value FROM zestor_kv WHERE kind COLLATE BINARY > ? OR (kind COLLATE BINARY = ? AND key COLLATE BINARY > ?) ORDER BY kind COLLATE BINARY, key COLLATE BINARY LIMIT ?;`
+	setQuery           = `INSERT INTO zestor_kv(kind,key,value) VALUES(?,?,?) ON CONFLICT(kind,key) DO NOTHING;`
 
 	updateQuery = `
 UPDATE zestor_kv
@@ -793,6 +803,108 @@ func (s *sqLiteStore[T]) GetAll(ctx context.Context) (map[string]map[string]T, e
 			out[kind] = make(map[string]T)
 		}
 		out[kind][key] = v
+	}
+	return out, rows.Err()
+}
+
+var _ store.Pager[struct{}] = (*sqLiteStore[struct{}])(nil)
+
+func (s *sqLiteStore[T]) ListPage(ctx context.Context, kind string, after *string, limit int) ([]store.KeyValue[T], error) {
+	if err := s.guardKind(ctx, kind); err != nil {
+		return nil, err
+	}
+	defer s.done()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	q, args := listPageQuery, []any{kind, limit}
+	if after != nil {
+		q, args = listPageAfterQuery, []any{kind, *after, limit}
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]store.KeyValue[T], 0, limit)
+	for rows.Next() {
+		var k string
+		var blob []byte
+		if err := rows.Scan(&k, &blob); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := s.codec.Unmarshal(blob, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, store.KeyValue[T]{Key: k, Value: v})
+	}
+	return out, rows.Err()
+}
+
+func (s *sqLiteStore[T]) KeysPage(ctx context.Context, kind string, after *string, limit int) ([]string, error) {
+	if err := s.guardKind(ctx, kind); err != nil {
+		return nil, err
+	}
+	defer s.done()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	q, args := keysPageQuery, []any{kind, limit}
+	if after != nil {
+		q, args = keysPageAfterQuery, []any{kind, *after, limit}
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0, limit)
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqLiteStore[T]) GetAllPage(ctx context.Context, after *store.PageCursor, limit int) ([]store.KindValue[T], error) {
+	if err := s.guard(ctx); err != nil {
+		return nil, err
+	}
+	defer s.done()
+	if limit < 1 {
+		return nil, store.ErrPageLimit
+	}
+
+	q, args := allPageQuery, []any{limit}
+	if after != nil {
+		q, args = allPageAfterQuery, []any{after.Kind, after.Kind, after.Key, limit}
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]store.KindValue[T], 0, limit)
+	for rows.Next() {
+		var kind, key string
+		var blob []byte
+		if err := rows.Scan(&kind, &key, &blob); err != nil {
+			return nil, err
+		}
+		var v T
+		if err := s.codec.Unmarshal(blob, &v); err != nil {
+			return nil, err
+		}
+		out = append(out, store.KindValue[T]{Kind: kind, Key: key, Value: v})
 	}
 	return out, rows.Err()
 }

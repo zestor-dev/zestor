@@ -78,15 +78,37 @@ func (h *server[T]) Get(ctx context.Context, req *connect.Request[storev1.GetReq
 }
 
 func (h *server[T]) List(ctx context.Context, req *connect.Request[storev1.ListRequest]) (*connect.Response[storev1.ListResponse], error) {
-	m, err := h.store.List(ctx, req.Msg.GetKind())
-	if err != nil {
-		return nil, h.fail(err)
+	if req.Msg.GetPageSize() < 0 {
+		return nil, badPageSize()
 	}
-	entries, err := h.entries(m)
+	if req.Msg.GetPageSize() == 0 {
+		m, err := h.store.List(ctx, req.Msg.GetKind())
+		if err != nil {
+			return nil, h.fail(err)
+		}
+		entries, err := h.entries(m)
+		if err != nil {
+			return nil, err
+		}
+		return connect.NewResponse(&storev1.ListResponse{Entries: entries}), nil
+	}
+	after, err := decodeKeyToken(req.Msg.GetPageToken())
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&storev1.ListResponse{Entries: entries}), nil
+	rows, more, err := h.listPage(ctx, req.Msg.GetKind(), after, int(req.Msg.GetPageSize()))
+	if err != nil {
+		return nil, h.fail(err)
+	}
+	entries, err := h.encodeKVs(rows)
+	if err != nil {
+		return nil, err
+	}
+	resp := &storev1.ListResponse{Entries: entries}
+	if more {
+		resp.NextPageToken = encodeKeyToken(entries[len(entries)-1].GetKey())
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (h *server[T]) Count(ctx context.Context, req *connect.Request[storev1.CountRequest]) (*connect.Response[storev1.CountResponse], error) {
@@ -98,25 +120,66 @@ func (h *server[T]) Count(ctx context.Context, req *connect.Request[storev1.Coun
 }
 
 func (h *server[T]) Keys(ctx context.Context, req *connect.Request[storev1.KeysRequest]) (*connect.Response[storev1.KeysResponse], error) {
-	keys, err := h.store.Keys(ctx, req.Msg.GetKind())
+	if req.Msg.GetPageSize() < 0 {
+		return nil, badPageSize()
+	}
+	if req.Msg.GetPageSize() == 0 {
+		keys, err := h.store.Keys(ctx, req.Msg.GetKind())
+		if err != nil {
+			return nil, h.fail(err)
+		}
+		return connect.NewResponse(&storev1.KeysResponse{Keys: keys}), nil
+	}
+	after, err := decodeKeyToken(req.Msg.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	keys, more, err := h.keysPage(ctx, req.Msg.GetKind(), after, int(req.Msg.GetPageSize()))
 	if err != nil {
 		return nil, h.fail(err)
 	}
-	return connect.NewResponse(&storev1.KeysResponse{Keys: keys}), nil
+	resp := &storev1.KeysResponse{Keys: keys}
+	if more {
+		resp.NextPageToken = encodeKeyToken(keys[len(keys)-1])
+	}
+	return connect.NewResponse(resp), nil
 }
 
-func (h *server[T]) GetAll(ctx context.Context, _ *connect.Request[storev1.GetAllRequest]) (*connect.Response[storev1.GetAllResponse], error) {
-	all, err := h.store.GetAll(ctx)
+func (h *server[T]) GetAll(ctx context.Context, req *connect.Request[storev1.GetAllRequest]) (*connect.Response[storev1.GetAllResponse], error) {
+	if req.Msg.GetPageSize() < 0 {
+		return nil, badPageSize()
+	}
+	if req.Msg.GetPageSize() == 0 {
+		all, err := h.store.GetAll(ctx)
+		if err != nil {
+			return nil, h.fail(err)
+		}
+		resp := &storev1.GetAllResponse{Kinds: make([]*storev1.KindEntries, 0, len(all))}
+		for _, kind := range slices.Sorted(maps.Keys(all)) {
+			entries, err := h.entries(all[kind])
+			if err != nil {
+				return nil, err
+			}
+			resp.Kinds = append(resp.Kinds, &storev1.KindEntries{Kind: kind, Entries: entries})
+		}
+		return connect.NewResponse(resp), nil
+	}
+	var after *store.PageCursor
+	if c := req.Msg.GetPageToken(); c != nil {
+		after = &store.PageCursor{Kind: c.GetKind(), Key: c.GetKey()}
+	}
+	rows, more, err := h.getAllPage(ctx, after, int(req.Msg.GetPageSize()))
 	if err != nil {
 		return nil, h.fail(err)
 	}
-	resp := &storev1.GetAllResponse{Kinds: make([]*storev1.KindEntries, 0, len(all))}
-	for _, kind := range slices.Sorted(maps.Keys(all)) {
-		entries, err := h.entries(all[kind])
-		if err != nil {
-			return nil, err
-		}
-		resp.Kinds = append(resp.Kinds, &storev1.KindEntries{Kind: kind, Entries: entries})
+	kinds, err := h.group(rows)
+	if err != nil {
+		return nil, err
+	}
+	resp := &storev1.GetAllResponse{Kinds: kinds}
+	if more {
+		last := rows[len(rows)-1]
+		resp.NextPageToken = &storev1.GetAllCursor{Kind: last.Kind, Key: last.Key}
 	}
 	return connect.NewResponse(resp), nil
 }

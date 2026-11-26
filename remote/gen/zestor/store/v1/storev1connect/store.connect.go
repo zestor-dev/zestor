@@ -59,11 +59,17 @@ const (
 // StoreServiceClient is a client for the zestor.store.v1.StoreService service.
 type StoreServiceClient interface {
 	Get(context.Context, *connect.Request[v1.GetRequest]) (*connect.Response[v1.GetResponse], error)
-	// List returns every entry of a kind. Filters are functions, so clients
-	// apply them after the call.
+	// List returns the entries of a kind. Filters are functions, so clients
+	// apply them after the call. page_size zero returns every entry. A positive
+	// page_size returns one page in ascending key order.
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 	Count(context.Context, *connect.Request[v1.CountRequest]) (*connect.Response[v1.CountResponse], error)
+	// Keys returns the keys of a kind. page_size zero returns every key, in
+	// the store's order. A positive page_size returns one page in ascending
+	// key order.
 	Keys(context.Context, *connect.Request[v1.KeysRequest]) (*connect.Response[v1.KeysResponse], error)
+	// GetAll returns every kind. page_size zero returns all of them. A positive
+	// page_size returns one page in ascending (kind, key) order.
 	GetAll(context.Context, *connect.Request[v1.GetAllRequest]) (*connect.Response[v1.GetAllResponse], error)
 	Set(context.Context, *connect.Request[v1.SetRequest]) (*connect.Response[v1.SetResponse], error)
 	// SetMany writes several entries of one kind in a single store call.
@@ -227,11 +233,17 @@ func (c *storeServiceClient) Watch(ctx context.Context, req *connect.Request[v1.
 // StoreServiceHandler is an implementation of the zestor.store.v1.StoreService service.
 type StoreServiceHandler interface {
 	Get(context.Context, *connect.Request[v1.GetRequest]) (*connect.Response[v1.GetResponse], error)
-	// List returns every entry of a kind. Filters are functions, so clients
-	// apply them after the call.
+	// List returns the entries of a kind. Filters are functions, so clients
+	// apply them after the call. page_size zero returns every entry. A positive
+	// page_size returns one page in ascending key order.
 	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 	Count(context.Context, *connect.Request[v1.CountRequest]) (*connect.Response[v1.CountResponse], error)
+	// Keys returns the keys of a kind. page_size zero returns every key, in
+	// the store's order. A positive page_size returns one page in ascending
+	// key order.
 	Keys(context.Context, *connect.Request[v1.KeysRequest]) (*connect.Response[v1.KeysResponse], error)
+	// GetAll returns every kind. page_size zero returns all of them. A positive
+	// page_size returns one page in ascending (kind, key) order.
 	GetAll(context.Context, *connect.Request[v1.GetAllRequest]) (*connect.Response[v1.GetAllResponse], error)
 	Set(context.Context, *connect.Request[v1.SetRequest]) (*connect.Response[v1.SetResponse], error)
 	// SetMany writes several entries of one kind in a single store call.
